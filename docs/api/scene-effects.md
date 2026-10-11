@@ -54,6 +54,7 @@ trip and the image is unchanged.
 | `bounce_light` | 0-2 | One bounce of screen-space indirect light; 0 is off |
 | `depth_of_field` | 0-2 | Lens blur away from the focus distance; 0 (default) is off |
 | `motion_blur` | 0-2 | Camera motion blur; 0 (default) is off |
+| `draw_distance` | 1-4 | Multiplier on the game's object cull distances; 1 (default) is the game's own |
 
 Only one active mod owns the policy, as with the other scene services.
 
@@ -116,6 +117,16 @@ Within about 6 m of the camera the blur fades out, so cockpits and vehicles
 that move with the camera stay sharp. History resets after a pause, a resize
 or a jump of more than 20 m.
 
+## Draw distance
+
+`draw_distance` scales the distance thresholds the game passes to its
+distance-cull helpers: characters 256 m, props 1024 m, dropped items 128 m,
+projectiles 256 m and vehicle parts 128 m at 1. AnyAPI hooks the helpers'
+shared call cells and multiplies the threshold before calling the original,
+so the game still makes every cull decision. Terrain, trees and grass follow
+the game's own render distance. `distance_available` in the status says the
+hooks are installed and `distance_scale` is the multiplier in use.
+
 ## Night sky
 
 The night sky pass is blended additively onto the HDR scene at the additive
@@ -144,7 +155,8 @@ rejected-frame counts, `gpu_ms` (smoothed GPU time of the pass),
 `sky_ready`, `sky_ms` and `night` (0 by day, 1 at night) the night sky pass,
 `contact_ready` and `contact_ms` the contact shadow pass, `gi_ready` and
 `gi_ms` the bounce light pass, and `lens_ready` and `lens_ms` the depth of
-field and motion blur pass. The values are read
+field and motion blur pass, and `distance_available` and `distance_scale`
+the draw distance hooks. The values are read
 back seven frames late without a fence.
 
 ## Limits

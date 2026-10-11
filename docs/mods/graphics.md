@@ -52,6 +52,11 @@ blurs what is nearer or farther. Motion blur blurs the world as the camera
 turns and moves; hands, held items and nearby cockpit parts stay sharp. Only
 the Cinematic preset turns them on (Low).
 
+**Object draw distance** (Game setting, Far 1.5x, Very far 2x or Extreme 3x)
+keeps characters, props, dropped items and vehicle parts drawn farther away.
+Terrain and trees follow the game's own render distance. High and Ultra use
+Far and Cinematic uses Very far.
+
 **Night sky** (Off, Subtle, Normal or Bright) adds stars, a milky way and a
 moon at night, and **Moonlight** (Off, Low, Medium or High) adds soft blue
 light from the moon. Both follow the game's own day and night: the stars turn

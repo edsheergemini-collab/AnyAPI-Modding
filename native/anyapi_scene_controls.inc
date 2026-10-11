@@ -67,6 +67,7 @@ static void pre_hud_hook(void* renderer,void* scene){
 }
 static void lighting_hook(void* renderer,void* scene){((SceneFn)lighting_cell.original())(renderer,scene);
 #ifndef ANYAPI_SCENE_CONTROLS_TEST
+ scene_effects::update_distance();
  scene_effects::record_contact(renderer,scene);
  scene_effects::record_gi(renderer,scene);
  scene_lighting::record(renderer,scene);
@@ -112,6 +113,7 @@ static DWORD WINAPI worker(void*){for(unsigned attempt=0;attempt<120&&!ready;++a
  if(composite&&safe_read_memory(uintptr_t(composite),&composite_body,8)&&composite_body){auto ssao=resolve_cell(composite_body,3280,6,SSAO,sizeof(SSAO));
   if(ssao&&composite_cell.install(composite,(void*)composite_hook)){if(ssao_cell.install(ssao,(void*)ssao_hook)){scene_effects::ao_available=true;log_line(ANY_LOG_INFO,"framework","SCENE_AO resolved=1 location=COMPOSITE_AFTER_NATIVE_SSAO");}else composite_cell.remove();}}
  if(!scene_effects::ao_available)log_line(ANY_LOG_WARN,"framework","SCENE_AO unavailable=1 native_ssao_kept=1");
+ scene_effects::install_distance(resolve_cell,scan_exact);
 #endif
  log_line(ANY_LOG_INFO,"framework","SCENE_AA_STAGE resolved=1 location=AFTER_SCENE_COMPOSITION_BEFORE_HUD scene_replacement_available=1");}
  else log_line(ANY_LOG_WARN,"framework","SCENE_AA_STAGE unavailable=1 replacement_AA_not_exposed=1");

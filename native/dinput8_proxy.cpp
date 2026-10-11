@@ -5258,6 +5258,7 @@ static DWORD WINAPI framework_runtime_thread(void*) {
 #include "anyapi_scene_contact.inc"
 #include "anyapi_scene_gi.inc"
 #include "anyapi_scene_lens.inc"
+#include "anyapi_scene_distance.inc"
 static void anyapi_creation_balance_render_camera(void*);
 #include "anyapi_scene_controls.inc"
 #include "anyapi_world_time.inc"
