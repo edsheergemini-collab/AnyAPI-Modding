@@ -1,0 +1,58 @@
+#define NOMINMAX
+#include <windows.h>
+#include <d3d12.h>
+#include <d3d12sdklayers.h>
+#include <dxgi1_4.h>
+#include <wrl/client.h>
+#include <DirectXPackedVector.h>
+#include <cassert>
+#include <cmath>
+#include <functional>
+#include <iostream>
+#include <vector>
+#include "effects/contact_gpu.h"
+using Microsoft::WRL::ComPtr;
+using namespace DirectX::PackedVector;
+// Contact shadows on WARP: a wall beside a slab darkens where the slab blocks
+// the sun, open wall and the slab itself keep their light, the result never
+// drops below ambient light, alpha is kept, and strength 0 changes nothing.
+int main(){std::cout<<std::unitbuf;
+ ComPtr<ID3D12Debug> debug;if(SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))))debug->EnableDebugLayer();
+ ComPtr<IDXGIFactory4> factory;assert(SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))));ComPtr<IDXGIAdapter> adapter;assert(SUCCEEDED(factory->EnumWarpAdapter(IID_PPV_ARGS(&adapter))));ComPtr<ID3D12Device> device;assert(SUCCEEDED(D3D12CreateDevice(adapter.Get(),D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device))));
+ D3D12_COMMAND_QUEUE_DESC qd{};ComPtr<ID3D12CommandQueue> queue;assert(SUCCEEDED(device->CreateCommandQueue(&qd,IID_PPV_ARGS(&queue))));ComPtr<ID3D12Fence> fence;assert(SUCCEEDED(device->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&fence))));HANDLE event=CreateEventW(nullptr,FALSE,FALSE,nullptr);UINT64 serial{};
+ auto wait=[&]{assert(SUCCEEDED(queue->Signal(fence.Get(),++serial)));assert(SUCCEEDED(fence->SetEventOnCompletion(serial,event)));assert(WaitForSingleObject(event,10000)==WAIT_OBJECT_0);};
+ ComPtr<ID3D12CommandAllocator> allocator;ComPtr<ID3D12GraphicsCommandList> list;assert(SUCCEEDED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&allocator))));assert(SUCCEEDED(device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,allocator.Get(),nullptr,IID_PPV_ARGS(&list))));assert(SUCCEEDED(list->Close()));
+ const UINT W=64,H=64;
+ struct Texture{ComPtr<ID3D12Resource> resource,upload,readback;D3D12_RESOURCE_DESC desc{};D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};UINT64 bytes{};};
+ auto buffer=[&](ComPtr<ID3D12Resource>& out,UINT64 bytes,D3D12_HEAP_TYPE type){D3D12_HEAP_PROPERTIES hp{};hp.Type=type;D3D12_RESOURCE_DESC d{};d.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;d.Width=bytes;d.Height=1;d.DepthOrArraySize=1;d.MipLevels=1;d.SampleDesc.Count=1;d.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;assert(SUCCEEDED(device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&d,type==D3D12_HEAP_TYPE_UPLOAD?D3D12_RESOURCE_STATE_GENERIC_READ:D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&out))));};
+ auto texture=[&](DXGI_FORMAT format,bool target){Texture t;t.desc.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;t.desc.Width=W;t.desc.Height=H;t.desc.DepthOrArraySize=1;t.desc.MipLevels=1;t.desc.Format=format;t.desc.SampleDesc.Count=1;t.desc.Flags=target?D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET:D3D12_RESOURCE_FLAG_NONE;D3D12_HEAP_PROPERTIES hp{};hp.Type=D3D12_HEAP_TYPE_DEFAULT;assert(SUCCEEDED(device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&t.desc,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&t.resource))));device->GetCopyableFootprints(&t.desc,0,1,0,&t.footprint,nullptr,nullptr,&t.bytes);buffer(t.upload,t.bytes,D3D12_HEAP_TYPE_UPLOAD);buffer(t.readback,t.bytes,D3D12_HEAP_TYPE_READBACK);return t;};
+ auto copy=[&](Texture& t,bool upload){D3D12_TEXTURE_COPY_LOCATION a{},b{};a.pResource=t.resource.Get();a.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;b.pResource=upload?t.upload.Get():t.readback.Get();b.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;b.PlacedFootprint=t.footprint;if(upload)list->CopyTextureRegion(&a,0,0,0,&b,nullptr);else list->CopyTextureRegion(&b,0,0,0,&a,nullptr);};
+ auto fill=[&](Texture& t,const std::function<void(unsigned char*,UINT,UINT)>& write){unsigned char* data{};D3D12_RANGE none{0,0};assert(SUCCEEDED(t.upload->Map(0,&none,(void**)&data)));for(UINT y=0;y<H;++y)for(UINT x=0;x<W;++x)write(data+t.footprint.Offset+y*t.footprint.Footprint.RowPitch,x,y);t.upload->Unmap(0,nullptr);copy(t,true);};
+ scene_contact_gpu::Gpu gpu;const float near_plane=.1f,lit_colour=.5f*(.70710678f+.2f*.5f)*.4f,floor_colour=.5f*.2f*.5f*.4f;
+ // Camera looks along +z at a wall 10 m away; the left half has a slab 0.5 m in front of it.
+ auto run=[&](const scene_contact_gpu::Frame& f){std::vector<float> out(W*H*4);
+  wait();assert(SUCCEEDED(allocator->Reset()));assert(SUCCEEDED(list->Reset(allocator.Get(),nullptr)));
+  auto target=texture(DXGI_FORMAT_R16G16B16A16_FLOAT,true),depth=texture(DXGI_FORMAT_R32_FLOAT,false),normals=texture(DXGI_FORMAT_R16G16B16A16_FLOAT,false),albedo=texture(DXGI_FORMAT_R16G16B16A16_FLOAT,false);
+  assert(gpu.ensure(device.Get(),queue.Get(),target.desc));
+  auto rgba=[](unsigned char* p,UINT x,float r,float g,float b,float a){auto h=(HALF*)p+x*4;h[0]=XMConvertFloatToHalf(r);h[1]=XMConvertFloatToHalf(g);h[2]=XMConvertFloatToHalf(b);h[3]=XMConvertFloatToHalf(a);};
+  fill(target,[&](unsigned char* p,UINT x,UINT){rgba(p,x,lit_colour,lit_colour,lit_colour,.25f);});
+  fill(depth,[&](unsigned char* p,UINT x,UINT){((float*)p)[x]=near_plane/(x<32?9.5f:10.f);});
+  fill(normals,[&](unsigned char* p,UINT x,UINT){rgba(p,x,0,0,-1,0);});
+  fill(albedo,[&](unsigned char* p,UINT x,UINT){rgba(p,x,.5f,.5f,.5f,0);});
+  D3D12_RESOURCE_BARRIER b[4]={scene_contact_gpu::barrier(target.resource.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_RENDER_TARGET),scene_contact_gpu::barrier(depth.resource.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),scene_contact_gpu::barrier(normals.resource.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COMMON),scene_contact_gpu::barrier(albedo.resource.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COMMON)};list->ResourceBarrier(4,b);
+  using I=scene_contact_gpu::Gpu::Input;const auto read=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,common=D3D12_RESOURCE_STATE_COMMON;
+  assert(gpu.record(list.Get(),target.resource.Get(),I{depth.resource.Get(),read},I{normals.resource.Get(),common},I{albedo.resource.Get(),common},f));
+  b[0]=scene_contact_gpu::barrier(target.resource.Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_COPY_SOURCE);list->ResourceBarrier(1,b);copy(target,false);assert(SUCCEEDED(list->Close()));ID3D12CommandList* lists[]={list.Get()};queue->ExecuteCommandLists(1,lists);wait();
+  unsigned char* pixels{};D3D12_RANGE range{0,SIZE_T(target.bytes)};assert(SUCCEEDED(target.readback->Map(0,&range,(void**)&pixels)));
+  for(UINT y=0;y<H;++y)for(UINT x=0;x<W;++x){auto h=(const HALF*)(pixels+target.footprint.Offset+y*target.footprint.Footprint.RowPitch)+x*4;for(int i=0;i<4;++i)out[(y*W+x)*4+i]=XMConvertHalfToFloat(h[i]);}
+  D3D12_RANGE none{0,0};target.readback->Unmap(0,&none);return out;};
+ // The sun is behind the camera and to the left, so the slab shades the wall just right of it.
+ auto base=[&]{scene_contact_gpu::Frame f;f.metrics={1.f/W,1.f/H,float(W),float(H)};f.right={1,0,0,.5f};f.up={0,1,0,.5f};f.forward={0,0,1,5000};f.projection={0,near_plane,1,0};f.sun={-.70710678f,0,-.70710678f,1};f.sun_colour={1,1,1,0};f.sky_colour={.2f,.2f,.2f,0};f.back_colour={0,0,0,0};f.params={.6f,.3f,0,60};return f;};
+ unsigned cases=0;
+ {auto o=run(base());float beside=1;for(UINT x=33;x<36;++x)beside=std::min(beside,o[(32*W+x)*4]);float open=o[(32*W+60)*4],slab=o[(32*W+16)*4];
+  std::cout<<"Contact beside="<<beside<<" open="<<open<<" slab="<<slab<<" floor="<<floor_colour<<'\n';assert(beside<lit_colour*.5f&&beside>=floor_colour-.003f&&std::abs(open-lit_colour)<.002f&&std::abs(slab-lit_colour)<.002f);
+  for(UINT i=0;i<W*H;++i)assert(o[i*4+3]==.25f);cases+=2;}
+ {auto f=base();f.sun[3]=0;auto o=run(f);for(UINT i=0;i<W*H;++i)assert(std::abs(o[i*4]-lit_colour)<.002f);std::cout<<"Strength 0 unchanged\n";++cases;}
+ auto bad=base();bad.params[0]=0;wait();assert(SUCCEEDED(allocator->Reset()));assert(SUCCEEDED(list->Reset(allocator.Get(),nullptr)));using I=scene_contact_gpu::Gpu::Input;assert(!gpu.record(list.Get(),nullptr,I{},I{},I{},bad));assert(SUCCEEDED(list->Close()));
+ std::cout<<"PASS: contact shadows "<<cases<<" D3D12 cases\n";CloseHandle(event);
+}

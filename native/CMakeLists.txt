@@ -306,6 +306,23 @@ target_include_directories(sky_gpu_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/eff
 target_compile_options(sky_gpu_test PRIVATE /UNDEBUG /EHsc /utf-8)
 target_link_libraries(sky_gpu_test PRIVATE d3d12 dxgi)
 add_test(NAME sky_gpu COMMAND sky_gpu_test)
+# Contact shadows: short screen-space sun shadows before volumetric lighting.
+add_executable(contact_shader_test contact_shader_test.cpp)
+target_compile_options(contact_shader_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(contact_shader_test PRIVATE d3dcompiler)
+add_test(NAME contact_kernels COMMAND contact_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/contact.hlsl")
+set(CONTACT_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/effects-generated/contact_bytecode.h")
+add_custom_command(OUTPUT "${CONTACT_GENERATED}"
+ COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/effects-generated"
+ COMMAND contact_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/contact.hlsl" "${CONTACT_GENERATED}"
+ DEPENDS contact_shader_test effects/contact.hlsl effects/contact_frame.h VERBATIM)
+add_custom_target(contact_bytecode DEPENDS "${CONTACT_GENERATED}")
+add_executable(contact_gpu_test contact_gpu_test.cpp)
+add_dependencies(contact_gpu_test contact_bytecode)
+target_include_directories(contact_gpu_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/effects-generated")
+target_compile_options(contact_gpu_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(contact_gpu_test PRIVATE d3d12 dxgi)
+add_test(NAME contact_gpu COMMAND contact_gpu_test)
 add_executable(hud_hints_test hud_hints_test.cpp)
 target_compile_options(hud_hints_test PRIVATE /UNDEBUG /EHsc /utf-8 /D_CRT_SECURE_NO_WARNINGS)
 target_link_libraries(hud_hints_test PRIVATE bcrypt d3d12 d3d11 dxgi d2d1 dwrite d3dcompiler)
@@ -319,7 +336,7 @@ endforeach()
 foreach(target dinput8 inventory_native_test menu_extensions_test players_producer_test settings_tabs_test settings_widgets_test storage_native_test hud_hints_test)
  add_dependencies(${target} lighting_bytecode)
  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/lighting-generated")
- add_dependencies(${target} effects_bytecode ao_bytecode sky_bytecode)
+ add_dependencies(${target} effects_bytecode ao_bytecode sky_bytecode contact_bytecode)
  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/effects-generated")
 endforeach()
 

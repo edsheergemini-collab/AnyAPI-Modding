@@ -49,6 +49,8 @@ trip and the image is unchanged.
 | `stars` | 0-2 | Brightness of the stars and milky way |
 | `moon` | 0-2 | Brightness of the moon and its glow |
 | `moonlight` | 0-2 | Strength of the unshadowed moonlight on surfaces |
+| `contact_shadows` | 0/1 | Run the contact shadow pass (see below) |
+| `contact_length` | 0.05-4 | Length of the shadow rays toward the sun, in metres |
 
 Only one active mod owns the policy, as with the other scene services.
 
@@ -79,6 +81,17 @@ albedo so bright surfaces do not go grey. The game multiplies only ambient and
 back light by this value, so direct sunlight is never darkened. Sky and cloud
 pixels are left unoccluded.
 
+## Contact shadows
+
+Before volumetric lighting, twelve screen-space steps toward the sun from each
+pixel within 60 m look for nearby geometry the game's shadow cascades are too
+coarse to catch (under parts, between blocks, where things meet the ground).
+Where a step lands behind the depth buffer within a short thickness, the
+pixel's sunlight is removed. That sunlight is rebuilt from the G-buffer and
+the game's own sun colour (`albedo × sun × (N·L + rim) × 0.4`), and the result
+never drops below the pixel's ambient and back light, so pixels the game
+already shadows are left alone. The pass fades out as the sun sets.
+
 ## Night sky
 
 The night sky pass is blended additively onto the HDR scene at the additive
@@ -104,7 +117,8 @@ rejected-frame counts, `gpu_ms` (smoothed GPU time of the pass),
 `adapted_exposure` (stops currently added by eye adaptation),
 `scene_luminance` (measured average) and `sun_visibility`. `ao_available`,
 `ao_ready`, `ao_frames` and `ao_ms` describe the ambient occlusion pass, and
-`sky_ready`, `sky_ms` and `night` (0 by day, 1 at night) the night sky pass. The values are read
+`sky_ready`, `sky_ms` and `night` (0 by day, 1 at night) the night sky pass,
+and `contact_ready` and `contact_ms` the contact shadow pass. The values are read
 back seven frames late without a fence.
 
 ## Limits

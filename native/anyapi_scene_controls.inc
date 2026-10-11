@@ -67,6 +67,7 @@ static void pre_hud_hook(void* renderer,void* scene){
 }
 static void lighting_hook(void* renderer,void* scene){((SceneFn)lighting_cell.original())(renderer,scene);
 #ifndef ANYAPI_SCENE_CONTROLS_TEST
+ scene_effects::record_contact(renderer,scene);
  scene_lighting::record(renderer,scene);
  scene_effects::record_sky(renderer,scene);
  scene_effects::record(renderer,scene);
