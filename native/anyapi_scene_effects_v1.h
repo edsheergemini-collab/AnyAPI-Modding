@@ -34,11 +34,15 @@
 // draw_distance 1..4 multiplies the distances at which the game stops drawing
 //   characters, props, dropped items, projectiles and vehicle parts (1 is the
 //   game's own; terrain and trees follow the game's render distance).
+// sun_disc 0..2 draws a limb-darkened sun in the game's sun colour, and clouds
+//   0..2 adds a drifting cloud layer (amount of cover) lit by the sun by day
+//   and the moon by night. Both default to 0 (off) and sit behind the game's
+//   own clouds.
 // Only one active mod owns the policy.
 struct AnySceneEffectsParametersV1 {uint32_t struct_size=sizeof(AnySceneEffectsParametersV1),version=1,enabled=0,finish=1,tonemap=1,look=0,eye_adaptation=1;
  float look_strength=1,exposure=0,adaptation_seconds=1.5f,bloom=.35f,glare=1,vignette=0;uint32_t ambient_occlusion=1;float ao_radius=1.5f,ao_strength=1;
  uint32_t night_sky=1;float stars=1,moon=1,moonlight=1;uint32_t contact_shadows=1;float contact_length=.6f,bounce_light=1;
- float depth_of_field=0,motion_blur=0,draw_distance=1;};
+ float depth_of_field=0,motion_blur=0,draw_distance=1,sun_disc=0,clouds=0;};
 // adapted_exposure: the stops currently added by eye adaptation.
 // scene_luminance: the measured average scene luminance, for diagnostics.
 // ao_*, sky_*, contact_*, gi_* and lens_* describe the ambient occlusion,

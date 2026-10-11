@@ -1,6 +1,8 @@
-// AnyAPI night sky: stars, a milky way and a moon on sky pixels, and moonlight
-// on surfaces, added to the HDR scene after the game's sky, fog and ocean and
-// before tone mapping. Blended additively, so with night 0 nothing changes.
+// AnyAPI sky: a sun disc, a drifting cloud layer, and at night stars, a milky
+// way and a moon on sky pixels plus moonlight on surfaces, drawn onto the HDR
+// scene after the game's sky, fog and ocean and before tone mapping. Blended
+// as premultiplied colour over the scene: alpha is cloud cover, so with no
+// clouds everything is purely added and with everything off nothing changes.
 cbuffer Frame : register(b0) {
     float4 metrics;   // 1/width, 1/height, width, height
     float4 right_axis; // w: tangent of half horizontal field of view
@@ -10,6 +12,9 @@ cbuffer Frame : register(b0) {
     float4 moon;       // toward the moon; w: above-horizon fade
     float4 celestial;  // cos, sin of the sky rotation; seconds
     float4 params;     // stars, moon brightness, moonlight, milky way
+    float4 sun_light;  // game sun colour; w: sun disc strength
+    float4 sky_light;  // game sky colour; w: cloud amount
+    float4 clouds;     // wind x, wind z, drift (km), daylight 0..1
 };
 Texture2D depth : register(t0);   // reversed: sky is 0
 Texture2D normals : register(t1); // gbuffer_1: world normal
@@ -64,8 +69,43 @@ float3 moon_disc(float3 d, float pixel) {
     float edge = 1 - smoothstep(1 - pixel * 2 / radius, 1, sqrt(r2));
     return glow + float3(1, .97, .9) * 3 * lit * maria * edge;
 }
+float3 sun_disc(float3 d, float pixel) {
+    float3 s = normalize(sun.xyz); float angle = length(d - s);
+    const float radius = .0125;
+    // Limb-darkened disc plus a tight halo, in the game's sun colour.
+    float edge = 1 - smoothstep(radius - pixel, radius + pixel, angle);
+    float mu = sqrt(saturate(1 - angle * angle / (radius * radius)));
+    float3 disc = sun_light.rgb * 14 * (.4 + .6 * mu) * edge;
+    float3 halo = sun_light.rgb * (exp(-angle * 60) * .5 + exp(-angle * 12) * .06);
+    return min(disc + halo, 60) * smoothstep(-.03, .02, s.y);
+}
+float cloud_noise(float2 p) {
+    float n = 0, a = .5;
+    [unroll] for (int i = 0; i < 5; ++i) { n += a * value_noise(float3(p, i * 3.7)); p = p * 2.03 + float2(1.7, 9.2); a *= .5; }
+    return n / .96875;
+}
+// One cloud layer about 1.5 km up. Lit by the sun by day and the moon by night,
+// with the game's sky colour as ambient, so dawn and dusk tint it too.
+float4 cloud_layer(float3 d) {
+    if (sky_light.w <= 0 || d.y <= .02) return 0;
+    float2 wind = clouds.xy * clouds.z;
+    float2 p = d.xz / d.y * 1.5 * .55 + wind;
+    float threshold = .72 - .18 * sky_light.w;
+    float density = saturate((cloud_noise(p) - threshold) / .22);
+    if (density <= 0) return 0;
+    float daylight = clouds.w;
+    float3 light = daylight > 0 ? normalize(sun.xyz) : normalize(moon.xyz);
+    // Self-shadow: denser cloud toward the light means a darker base.
+    float toward = saturate((cloud_noise(p + light.xz * .12) - threshold) / .22);
+    float lit = lerp(1, .45, saturate(toward - density * .5));
+    float forward = pow(saturate(dot(d, light)), 6) * (1 - density) * 1.5;   // silver lining
+    float3 key = sun_light.rgb * daylight + float3(.55, .65, .9) * .15 * params.z * moon.w * sun.w;
+    float3 colour = .9 * (key * (lit + forward) + sky_light.rgb * .8) * .4;
+    float alpha = density * .9 * smoothstep(.02, .12, d.y);
+    return float4(colour * alpha, alpha);
+}
 float4 Sky(Varying v) : SV_Target {
-    float night = sun.w; if (night <= 0) return 0;
+    float night = sun.w; if (night <= 0 && sun_light.w <= 0 && sky_light.w <= 0) return 0;
     float2 ndc = v.uv * float2(2, -2) + float2(-1, 1);
     float3 d = normalize(forward_axis.xyz + right_axis.xyz * ndc.x * right_axis.w + up_axis.xyz * ndc.y * up_axis.w);
     float scene_depth = depth.SampleLevel(point_sampler, v.uv, 0).r;
@@ -73,10 +113,18 @@ float4 Sky(Varying v) : SV_Target {
     float3 colour = 0;
     if (scene_depth <= 0 && sea.x <= 0 && sea.y <= 0) {
         float pixel = 2 * up_axis.w * metrics.y;
-        float3 c = float3(d.x, d.y * celestial.x + d.z * celestial.y, d.z * celestial.x - d.y * celestial.y);
-        float horizon = smoothstep(-.02, .18, d.y);
-        colour = (stars(c, pixel) * params.x + milky_way(c) * params.w) * horizon + moon_disc(d, pixel) * params.y * moon.w;
-    } else if (scene_depth > 0) {
+        // The game's own clouds sit in front of everything added here.
+        if (normals.SampleLevel(point_sampler, v.uv, 0).w > .5) return 0;
+        float3 behind = 0;
+        if (night > 0) {
+            float3 c = float3(d.x, d.y * celestial.x + d.z * celestial.y, d.z * celestial.x - d.y * celestial.y);
+            float horizon = smoothstep(-.02, .18, d.y);
+            behind = ((stars(c, pixel) * params.x + milky_way(c) * params.w) * horizon + moon_disc(d, pixel) * params.y * moon.w) * night;
+        }
+        if (sun_light.w > 0) behind += sun_disc(d, pixel) * sun_light.w;
+        float4 cloud = cloud_layer(d);
+        return float4(cloud.rgb + behind * (1 - cloud.a), cloud.a);
+    } else if (scene_depth > 0 && night > 0) {
         // Moonlight: unshadowed (the game has no shadow map for it).
         float3 n = normalize(normals.SampleLevel(point_sampler, v.uv, 0).xyz);
         float3 a = albedo.SampleLevel(point_sampler, v.uv, 0).rgb;

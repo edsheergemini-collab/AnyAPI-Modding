@@ -58,6 +58,11 @@ int main(){std::cout<<std::unitbuf;
   Scene sea;sea.sea=[](UINT,UINT){return true;};o=run(scene_sky_gpu::build(r2,u2,f2,midnight,W,H,3,1,1,1),sea);for(UINT i=0;i<W*H*4;i+=4)assert(std::abs(o[i]-.1f)<1e-4f);std::cout<<"Ocean untouched\n";cases+=2;}
  {Scene ground;ground.depth=[](UINT,UINT){return .5f;};auto o=run(scene_sky_gpu::build(right,up,forward,midnight,W,H,3,1,1,1),ground);float facing=o[(H/2*W+W/2)*4];
   ground.normal[1]=-1;auto away=run(scene_sky_gpu::build(right,up,forward,midnight,W,H,3,1,1,1),ground);float back=away[(H/2*W+W/2)*4];std::cout<<"Moonlight facing="<<facing<<" away="<<back<<'\n';assert(facing>.12f&&std::abs(back-.1f)<1e-4f);++cases;}
+ // Daytime sky: a sun disc where the sun is, and a cloud layer above the horizon only.
+ {const float sun_colour[3]{1,.9f,.8f},sky_colour[3]{.3f,.4f,.6f};float r2[4]{1,0,0,.05f},u2[4]{0,0,-1,.05f},f2[4]{0,1,0,0};
+  auto o=run(scene_sky_gpu::build(r2,u2,f2,noon,W,H,3,0,0,0,sun_colour,sky_colour,1,0),Scene{});float centre=o[(H/2*W+W/2)*4],corner=o[(2*W+2)*4];std::cout<<"Sun centre="<<centre<<" corner="<<corner<<'\n';assert(centre>5&&corner<1);alpha_kept(o);
+  o=run(scene_sky_gpu::build(right,up,forward,noon,W,H,3,0,0,0,sun_colour,sky_colour,0,1.5f),Scene{});unsigned covered=0;for(UINT i=0;i<W*H;++i)if(std::abs(o[i*4]-.1f)>.01f)++covered;
+  bool below=true;for(UINT x=0;x<W;++x)below=below&&std::abs(o[((H-1)*W+x)*4]-.1f)<1e-4f;std::cout<<"Clouds covered="<<covered<<" below horizon untouched="<<below<<'\n';assert(covered>W*H/20&&below);alpha_kept(o);cases+=2;}
  auto bad=scene_sky_gpu::build(right,up,forward,midnight,W,H,3,1,1,1);bad.params[0]=5;wait();assert(SUCCEEDED(allocator->Reset()));assert(SUCCEEDED(list->Reset(allocator.Get(),nullptr)));using I=scene_sky_gpu::Gpu::Input;assert(!gpu.record(list.Get(),nullptr,I{},I{},I{},I{},bad));assert(SUCCEEDED(list->Close()));
  std::cout<<"PASS: night sky "<<cases<<" D3D12 cases\n";CloseHandle(event);
 }

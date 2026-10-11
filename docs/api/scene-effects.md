@@ -54,6 +54,8 @@ trip and the image is unchanged.
 | `bounce_light` | 0-2 | One bounce of screen-space indirect light; 0 is off |
 | `depth_of_field` | 0-2 | Lens blur away from the focus distance; 0 (default) is off |
 | `motion_blur` | 0-2 | Camera motion blur; 0 (default) is off |
+| `sun_disc` | 0-2 | Sun disc in the game's sun colour; 0 (default) is off |
+| `clouds` | 0-2 | Drifting cloud layer, amount of cover; 0 (default) is off |
 | `draw_distance` | 1-4 | Multiplier on the game's object cull distances; 1 (default) is the game's own |
 
 Only one active mod owns the policy, as with the other scene services.
@@ -126,6 +128,20 @@ shared call cells and multiplies the threshold before calling the original,
 so the game still makes every cull decision. Terrain, trees and grass follow
 the game's own render distance. `distance_available` in the status says the
 hooks are installed and `distance_scale` is the multiplier in use.
+
+## Sun and cloud layer
+
+The sky pass also runs by day when `sun_disc` or `clouds` is above 0. The sun
+is a limb-darkened disc about 1.4° across with a tight halo, in the game's own
+sun colour, so it reddens at dusk with the rest of the lighting. The cloud
+layer is five octaves of noise on a plane about 1.5 km up, drifting slowly
+with wall time; `clouds` sets how much of the sky it covers. It is lit by the
+sun by day (with a silver lining toward the sun and darker bases where the
+cloud thickens toward the light), by the moon at night, and always by the
+game's sky colour as ambient, so it follows the day/night cycle. Clouds are
+blended as premultiplied colour over the sky and hide the stars, moon and sun
+behind them. Everything added here sits behind the game's own clouds, and
+only sky pixels are touched.
 
 ## Night sky
 

@@ -26,5 +26,7 @@ int wmain(int argc,wchar_t** argv){assert(argc==2||argc==3);std::ofstream out;if
  float right[4]{1,0,0,.8f},up[4]{0,1,0,.45f},forward[4]{0,0,1,0};auto f=scene_sky_gpu::build(right,up,forward,midnight,64,64,12.5f,1,1,1);assert(scene_sky_gpu::valid(f)&&f.sun[3]==1&&f.moon[3]==1&&std::abs(f.celestial[0]*f.celestial[0]+f.celestial[1]*f.celestial[1]-1)<1e-5f);
  float noon[3]={0,1,0};f=scene_sky_gpu::build(right,up,forward,noon,64,64,0,1,1,1);assert(scene_sky_gpu::valid(f)&&f.sun[3]==0&&f.moon[3]==0);
  auto bad=f;bad.params[1]=3;assert(!scene_sky_gpu::valid(bad));bad=f;bad.sun[3]=NAN;assert(!scene_sky_gpu::valid(bad));bad=f;bad.metrics[2]=4;assert(!scene_sky_gpu::valid(bad));
- std::cout<<"PASS: night sky shaders compile; constants, sampler slots, night factor and moon placement validated\n";
+ assert(scene_sky_gpu::day_factor(.5f)==1&&scene_sky_gpu::day_factor(-.5f)==0);const float sun_colour[3]{2,1.8f,1.5f},sky_colour[3]{.3f,.4f,.6f};f=scene_sky_gpu::build(right,up,forward,noon,64,64,0,0,0,0,sun_colour,sky_colour,1,1.5f);
+ assert(scene_sky_gpu::valid(f)&&f.sun_light[0]==2&&f.sun_light[3]==1&&f.sky_light[3]==1.5f&&f.clouds[3]==1);bad=f;bad.sky_light[3]=3;assert(!scene_sky_gpu::valid(bad));bad=f;bad.sun_light[1]=-1;assert(!scene_sky_gpu::valid(bad));
+ std::cout<<"PASS: sky shaders compile; constants, sampler slots, night factor, moon placement and day sky constants validated\n";
 }

@@ -57,6 +57,12 @@ keeps characters, props, dropped items and vehicle parts drawn farther away.
 Terrain and trees follow the game's own render distance. High and Ultra use
 Far and Cinematic uses Very far.
 
+**Sun** (Off, Soft, Normal or Bright) draws a round sun with a soft halo, and
+**Cloud layer** (Off, Few, Some or Many) adds high drifting clouds above the
+game's own. Both follow the time of day: the sun and clouds turn orange at
+sunrise and sunset, and the clouds are moonlit at night. Presets use the sun
+from Low up and clouds from Medium up.
+
 **Night sky** (Off, Subtle, Normal or Bright) adds stars, a milky way and a
 moon at night, and **Moonlight** (Off, Low, Medium or High) adds soft blue
 light from the moon. Both follow the game's own day and night: the stars turn
