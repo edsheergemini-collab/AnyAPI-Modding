@@ -340,6 +340,23 @@ target_include_directories(gi_gpu_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/effe
 target_compile_options(gi_gpu_test PRIVATE /UNDEBUG /EHsc /utf-8)
 target_link_libraries(gi_gpu_test PRIVATE d3d12 dxgi)
 add_test(NAME gi_gpu COMMAND gi_gpu_test)
+# Lens: depth of field and camera motion blur before the finishing pass.
+add_executable(lens_shader_test lens_shader_test.cpp)
+target_compile_options(lens_shader_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(lens_shader_test PRIVATE d3dcompiler)
+add_test(NAME lens_kernels COMMAND lens_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/lens.hlsl")
+set(LENS_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/effects-generated/lens_bytecode.h")
+add_custom_command(OUTPUT "${LENS_GENERATED}"
+ COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/effects-generated"
+ COMMAND lens_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/lens.hlsl" "${LENS_GENERATED}"
+ DEPENDS lens_shader_test effects/lens.hlsl effects/lens_frame.h VERBATIM)
+add_custom_target(lens_bytecode DEPENDS "${LENS_GENERATED}")
+add_executable(lens_gpu_test lens_gpu_test.cpp)
+add_dependencies(lens_gpu_test lens_bytecode)
+target_include_directories(lens_gpu_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/effects-generated")
+target_compile_options(lens_gpu_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(lens_gpu_test PRIVATE d3d12 dxgi)
+add_test(NAME lens_gpu COMMAND lens_gpu_test)
 add_executable(hud_hints_test hud_hints_test.cpp)
 target_compile_options(hud_hints_test PRIVATE /UNDEBUG /EHsc /utf-8 /D_CRT_SECURE_NO_WARNINGS)
 target_link_libraries(hud_hints_test PRIVATE bcrypt d3d12 d3d11 dxgi d2d1 dwrite d3dcompiler)
@@ -353,7 +370,7 @@ endforeach()
 foreach(target dinput8 inventory_native_test menu_extensions_test players_producer_test settings_tabs_test settings_widgets_test storage_native_test hud_hints_test)
  add_dependencies(${target} lighting_bytecode)
  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/lighting-generated")
- add_dependencies(${target} effects_bytecode ao_bytecode sky_bytecode contact_bytecode gi_bytecode)
+ add_dependencies(${target} effects_bytecode ao_bytecode sky_bytecode contact_bytecode gi_bytecode lens_bytecode)
  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/effects-generated")
 endforeach()
 

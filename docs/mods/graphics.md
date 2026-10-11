@@ -46,6 +46,12 @@ from Medium up.
 with their colour. Only what is on screen can bounce. Presets use it from High
 up.
 
+**Depth of field** and **Motion blur** (Off, Low, Medium or High) are camera
+effects. Depth of field focuses on whatever is in the middle of the screen and
+blurs what is nearer or farther. Motion blur blurs the world as the camera
+turns and moves; hands, held items and nearby cockpit parts stay sharp. Only
+the Cinematic preset turns them on (Low).
+
 **Night sky** (Off, Subtle, Normal or Bright) adds stars, a milky way and a
 moon at night, and **Moonlight** (Off, Low, Medium or High) adds soft blue
 light from the moon. Both follow the game's own day and night: the stars turn

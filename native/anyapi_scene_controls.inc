@@ -71,6 +71,7 @@ static void lighting_hook(void* renderer,void* scene){((SceneFn)lighting_cell.or
  scene_effects::record_gi(renderer,scene);
  scene_lighting::record(renderer,scene);
  scene_effects::record_sky(renderer,scene);
+ scene_effects::record_lens(renderer,scene);
  scene_effects::record(renderer,scene);
 #endif
 }

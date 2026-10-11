@@ -52,6 +52,8 @@ trip and the image is unchanged.
 | `contact_shadows` | 0/1 | Run the contact shadow pass (see below) |
 | `contact_length` | 0.05-4 | Length of the shadow rays toward the sun, in metres |
 | `bounce_light` | 0-2 | One bounce of screen-space indirect light; 0 is off |
+| `depth_of_field` | 0-2 | Lens blur away from the focus distance; 0 (default) is off |
+| `motion_blur` | 0-2 | Camera motion blur; 0 (default) is off |
 
 Only one active mod owns the policy, as with the other scene services.
 
@@ -101,6 +103,19 @@ surfaces that face the pixel, weighted by both surfaces' angles and distance,
 and add it tinted by the pixel's albedo. A red wall warms the ground next to
 it. Only what is on screen can bounce, and sky pixels send nothing.
 
+## Depth of field and motion blur
+
+After the night sky and before finishing, the lens pass redraws the HDR scene
+from a copy. Depth of field focuses on the nearest of five taps around the
+screen centre (ignoring anything within a metre, such as held items) and eases
+the focus over about a quarter second; the blur radius follows the difference
+in inverse distance from the focus, up to 12 pixels at 1080p. Motion blur
+reprojects each pixel with last frame's camera (position and axes), so it
+blurs camera turns and movement only: the game has no per-object motion.
+Within about 6 m of the camera the blur fades out, so cockpits and vehicles
+that move with the camera stay sharp. History resets after a pause, a resize
+or a jump of more than 20 m.
+
 ## Night sky
 
 The night sky pass is blended additively onto the HDR scene at the additive
@@ -127,8 +142,9 @@ rejected-frame counts, `gpu_ms` (smoothed GPU time of the pass),
 `scene_luminance` (measured average) and `sun_visibility`. `ao_available`,
 `ao_ready`, `ao_frames` and `ao_ms` describe the ambient occlusion pass, and
 `sky_ready`, `sky_ms` and `night` (0 by day, 1 at night) the night sky pass,
-`contact_ready` and `contact_ms` the contact shadow pass, and `gi_ready` and
-`gi_ms` the bounce light pass. The values are read
+`contact_ready` and `contact_ms` the contact shadow pass, `gi_ready` and
+`gi_ms` the bounce light pass, and `lens_ready` and `lens_ms` the depth of
+field and motion blur pass. The values are read
 back seven frames late without a fence.
 
 ## Limits
