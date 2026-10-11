@@ -42,6 +42,10 @@ from Medium up.
 under parts, between blocks and where things touch the ground. Presets use it
 from Medium up.
 
+**Bounce light** (Off, Low, Medium or High) lets lit surfaces tint nearby ones
+with their colour. Only what is on screen can bounce. Presets use it from High
+up.
+
 **Night sky** (Off, Subtle, Normal or Bright) adds stars, a milky way and a
 moon at night, and **Moonlight** (Off, Low, Medium or High) adds soft blue
 light from the moon. Both follow the game's own day and night: the stars turn

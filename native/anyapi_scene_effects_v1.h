@@ -24,15 +24,17 @@
 //   is added in daylight.
 // contact_shadows 0/1 adds short-range sun shadows the game's shadow maps are
 //   too coarse for (under parts, between blocks); contact_length 0.05..4 m.
+// bounce_light 0..2 adds one bounce of screen-space indirect light (lit
+//   surfaces tint nearby ones with their colour); 0 is off.
 // Only one active mod owns the policy.
 struct AnySceneEffectsParametersV1 {uint32_t struct_size=sizeof(AnySceneEffectsParametersV1),version=1,enabled=0,finish=1,tonemap=1,look=0,eye_adaptation=1;
  float look_strength=1,exposure=0,adaptation_seconds=1.5f,bloom=.35f,glare=1,vignette=0;uint32_t ambient_occlusion=1;float ao_radius=1.5f,ao_strength=1;
- uint32_t night_sky=1;float stars=1,moon=1,moonlight=1;uint32_t contact_shadows=1;float contact_length=.6f;};
+ uint32_t night_sky=1;float stars=1,moon=1,moonlight=1;uint32_t contact_shadows=1;float contact_length=.6f,bounce_light=1;};
 // adapted_exposure: the stops currently added by eye adaptation.
 // scene_luminance: the measured average scene luminance, for diagnostics.
-// ao_*, sky_* and contact_* describe the ambient occlusion, night sky and
-// contact shadow passes.
+// ao_*, sky_*, contact_* and gi_* describe the ambient occlusion, night sky,
+// contact shadow and bounce light passes.
 struct AnySceneEffectsStatusV1 {uint32_t struct_size=sizeof(AnySceneEffectsStatusV1),version=1,available=0,ready=0;uint64_t frames=0,rejected_frames=0;
  float gpu_ms=-1,adapted_exposure=0,scene_luminance=-1,sun_visibility=0;int32_t error=0;uint32_t ao_available=0,ao_ready=0;uint64_t ao_frames=0;float ao_ms=-1;
- uint32_t sky_ready=0;float sky_ms=-1,night=0;uint32_t contact_ready=0;float contact_ms=-1;};
+ uint32_t sky_ready=0;float sky_ms=-1,night=0;uint32_t contact_ready=0;float contact_ms=-1;uint32_t gi_ready=0;float gi_ms=-1;};
 struct AnySceneEffectsV1 {uint32_t struct_size,version;bool(*set)(const AnySceneEffectsParametersV1*);bool(*status)(AnySceneEffectsStatusV1*);};

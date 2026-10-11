@@ -51,6 +51,7 @@ trip and the image is unchanged.
 | `moonlight` | 0-2 | Strength of the unshadowed moonlight on surfaces |
 | `contact_shadows` | 0/1 | Run the contact shadow pass (see below) |
 | `contact_length` | 0.05-4 | Length of the shadow rays toward the sun, in metres |
+| `bounce_light` | 0-2 | One bounce of screen-space indirect light; 0 is off |
 
 Only one active mod owns the policy, as with the other scene services.
 
@@ -92,6 +93,14 @@ the game's own sun colour (`albedo × sun × (N·L + rim) × 0.4`), and the resu
 never drops below the pixel's ambient and back light, so pixels the game
 already shadows are left alone. The pass fades out as the sun sets.
 
+## Bounce light
+
+After contact shadows and before volumetric lighting, ten spiral samples
+within 2.5 m (out to 120 m from the camera) gather the lit colour of nearby
+surfaces that face the pixel, weighted by both surfaces' angles and distance,
+and add it tinted by the pixel's albedo. A red wall warms the ground next to
+it. Only what is on screen can bounce, and sky pixels send nothing.
+
 ## Night sky
 
 The night sky pass is blended additively onto the HDR scene at the additive
@@ -118,7 +127,8 @@ rejected-frame counts, `gpu_ms` (smoothed GPU time of the pass),
 `scene_luminance` (measured average) and `sun_visibility`. `ao_available`,
 `ao_ready`, `ao_frames` and `ao_ms` describe the ambient occlusion pass, and
 `sky_ready`, `sky_ms` and `night` (0 by day, 1 at night) the night sky pass,
-and `contact_ready` and `contact_ms` the contact shadow pass. The values are read
+`contact_ready` and `contact_ms` the contact shadow pass, and `gi_ready` and
+`gi_ms` the bounce light pass. The values are read
 back seven frames late without a fence.
 
 ## Limits

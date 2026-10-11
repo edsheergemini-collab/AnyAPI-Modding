@@ -323,6 +323,23 @@ target_include_directories(contact_gpu_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}
 target_compile_options(contact_gpu_test PRIVATE /UNDEBUG /EHsc /utf-8)
 target_link_libraries(contact_gpu_test PRIVATE d3d12 dxgi)
 add_test(NAME contact_gpu COMMAND contact_gpu_test)
+# Bounce light: one bounce of screen-space indirect light before volumetric lighting.
+add_executable(gi_shader_test gi_shader_test.cpp)
+target_compile_options(gi_shader_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(gi_shader_test PRIVATE d3dcompiler)
+add_test(NAME gi_kernels COMMAND gi_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/gi.hlsl")
+set(GI_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/effects-generated/gi_bytecode.h")
+add_custom_command(OUTPUT "${GI_GENERATED}"
+ COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/effects-generated"
+ COMMAND gi_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/gi.hlsl" "${GI_GENERATED}"
+ DEPENDS gi_shader_test effects/gi.hlsl effects/gi_frame.h VERBATIM)
+add_custom_target(gi_bytecode DEPENDS "${GI_GENERATED}")
+add_executable(gi_gpu_test gi_gpu_test.cpp)
+add_dependencies(gi_gpu_test gi_bytecode)
+target_include_directories(gi_gpu_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/effects-generated")
+target_compile_options(gi_gpu_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(gi_gpu_test PRIVATE d3d12 dxgi)
+add_test(NAME gi_gpu COMMAND gi_gpu_test)
 add_executable(hud_hints_test hud_hints_test.cpp)
 target_compile_options(hud_hints_test PRIVATE /UNDEBUG /EHsc /utf-8 /D_CRT_SECURE_NO_WARNINGS)
 target_link_libraries(hud_hints_test PRIVATE bcrypt d3d12 d3d11 dxgi d2d1 dwrite d3dcompiler)
@@ -336,7 +353,7 @@ endforeach()
 foreach(target dinput8 inventory_native_test menu_extensions_test players_producer_test settings_tabs_test settings_widgets_test storage_native_test hud_hints_test)
  add_dependencies(${target} lighting_bytecode)
  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/lighting-generated")
- add_dependencies(${target} effects_bytecode ao_bytecode sky_bytecode contact_bytecode)
+ add_dependencies(${target} effects_bytecode ao_bytecode sky_bytecode contact_bytecode gi_bytecode)
  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/effects-generated")
 endforeach()
 
