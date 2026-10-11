@@ -289,6 +289,23 @@ target_include_directories(ao_gpu_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/effe
 target_compile_options(ao_gpu_test PRIVATE /UNDEBUG /EHsc /utf-8)
 target_link_libraries(ao_gpu_test PRIVATE d3d12 dxgi)
 add_test(NAME ao_gpu COMMAND ao_gpu_test)
+# Night sky: stars, moon and moonlight on the game's day/night clock.
+add_executable(sky_shader_test sky_shader_test.cpp)
+target_compile_options(sky_shader_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(sky_shader_test PRIVATE d3dcompiler)
+add_test(NAME sky_kernels COMMAND sky_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/sky.hlsl")
+set(SKY_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/effects-generated/sky_bytecode.h")
+add_custom_command(OUTPUT "${SKY_GENERATED}"
+ COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/effects-generated"
+ COMMAND sky_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/sky.hlsl" "${SKY_GENERATED}"
+ DEPENDS sky_shader_test effects/sky.hlsl effects/sky_frame.h VERBATIM)
+add_custom_target(sky_bytecode DEPENDS "${SKY_GENERATED}")
+add_executable(sky_gpu_test sky_gpu_test.cpp)
+add_dependencies(sky_gpu_test sky_bytecode)
+target_include_directories(sky_gpu_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/effects-generated")
+target_compile_options(sky_gpu_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(sky_gpu_test PRIVATE d3d12 dxgi)
+add_test(NAME sky_gpu COMMAND sky_gpu_test)
 add_executable(hud_hints_test hud_hints_test.cpp)
 target_compile_options(hud_hints_test PRIVATE /UNDEBUG /EHsc /utf-8 /D_CRT_SECURE_NO_WARNINGS)
 target_link_libraries(hud_hints_test PRIVATE bcrypt d3d12 d3d11 dxgi d2d1 dwrite d3dcompiler)
@@ -302,7 +319,7 @@ endforeach()
 foreach(target dinput8 inventory_native_test menu_extensions_test players_producer_test settings_tabs_test settings_widgets_test storage_native_test hud_hints_test)
  add_dependencies(${target} lighting_bytecode)
  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/lighting-generated")
- add_dependencies(${target} effects_bytecode ao_bytecode)
+ add_dependencies(${target} effects_bytecode ao_bytecode sky_bytecode)
  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/effects-generated")
 endforeach()
 

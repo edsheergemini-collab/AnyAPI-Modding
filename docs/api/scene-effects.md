@@ -45,6 +45,10 @@ trip and the image is unchanged.
 | `ambient_occlusion` | 0/1 | Replace the game's SSAO output with detailed ambient occlusion (see below). The game's SSAO switch is forced on while this is on |
 | `ao_radius` | 0.25-4 | World radius of the occlusion search, in metres |
 | `ao_strength` | 0-2 | How dark occlusion gets |
+| `night_sky` | 0/1 | Run the night sky pass (see below) |
+| `stars` | 0-2 | Brightness of the stars and milky way |
+| `moon` | 0-2 | Brightness of the moon and its glow |
+| `moonlight` | 0-2 | Strength of the unshadowed moonlight on surfaces |
 
 Only one active mod owns the policy, as with the other scene services.
 
@@ -75,13 +79,32 @@ albedo so bright surfaces do not go grey. The game multiplies only ambient and
 back light by this value, so direct sunlight is never darkened. Sky and cloud
 pixels are left unoccluded.
 
+## Night sky
+
+The night sky pass is blended additively onto the HDR scene at the additive
+stage, before the finishing pass, so tone mapping and bloom treat it like the
+rest of the scene. Everything follows the game's own sun
+(`scene_renderer` +0xa78), so it rides the day/night cycle:
+
+- A night factor fades in as the sun drops below the horizon. In daylight
+  the pass records nothing.
+- Stars and a faint milky way sit on sky pixels (depth 0, not ocean). The
+  star field turns about the same axis as the sun, and stars twinkle and fade
+  near the horizon. Clouds have real depth, so they cover the stars.
+- The moon sits opposite the sun, lifted so it stands high at midnight. It
+  has a phase-lit disc with maria and a soft glow.
+- Moonlight lights surfaces facing the moon, using the G-buffer normal and
+  albedo. The game has no shadow map for the moon, so moonlight casts no
+  shadows.
+
 ## Status
 
 `status` fills `AnySceneEffectsStatusV1`: `available`, `ready`, frame and
 rejected-frame counts, `gpu_ms` (smoothed GPU time of the pass),
 `adapted_exposure` (stops currently added by eye adaptation),
 `scene_luminance` (measured average) and `sun_visibility`. `ao_available`,
-`ao_ready`, `ao_frames` and `ao_ms` describe the ambient occlusion pass. The values are read
+`ao_ready`, `ao_frames` and `ao_ms` describe the ambient occlusion pass, and
+`sky_ready`, `sky_ms` and `night` (0 by day, 1 at night) the night sky pass. The values are read
 back seven frames late without a fence.
 
 ## Limits

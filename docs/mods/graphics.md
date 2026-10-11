@@ -38,6 +38,12 @@ corners, under parts and between blocks. It only darkens ambient light, never
 sunlight, and is hidden while Ambient occlusion is forced off. Presets use it
 from Medium up.
 
+**Night sky** (Off, Subtle, Normal or Bright) adds stars, a milky way and a
+moon at night, and **Moonlight** (Off, Low, Medium or High) adds soft blue
+light from the moon. Both follow the game's own day and night: the stars turn
+with the sun and the moon rises as the sun sets. The moon casts no shadows.
+Presets use them from Low up.
+
 ## Controls
 
 The original game controls remain above the mod section. Choosing Game setting
