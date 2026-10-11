@@ -207,8 +207,11 @@ float4 Accumulate(Varying v) : SV_Target {
     float2 uv=float2(dot(relative,previous_right.xyz)/(z*previous_right.w),dot(relative,previous_up.xyz)/(z*previous_up.w))*float2(.5,-.5)+.5;
     if(any(uv<0)||any(uv>1))return current;
     float4 history=control.x>.5?history_b.SampleLevel(linear_sampler,uv,0):history_a.SampleLevel(linear_sampler,uv,0);
+    // Only neighbours at a similar depth bound the history: at a silhouette the
+    // sky's dense fog must not widen the box for the object in front of it.
     uint w,h;volume.GetDimensions(w,h);float2 texel=1/float2(w,h);float4 low=current,high=current;
-    [unroll]for(int y=-1;y<=1;++y)[unroll]for(int x=-1;x<=1;++x){float4 s=volume.SampleLevel(point_sampler,v.uv+float2(x,y)*texel,0);low=min(low,s);high=max(high,s);}
+    float centre=view_distance(scene_depth.SampleLevel(point_sampler,v.uv,0)),tolerance=max(.5,centre*.05);
+    [unroll]for(int y=-1;y<=1;++y)[unroll]for(int x=-1;x<=1;++x){float2 uv_n=v.uv+float2(x,y)*texel;if(abs(view_distance(scene_depth.SampleLevel(point_sampler,uv_n,0))-centre)>tolerance)continue;float4 s=volume.SampleLevel(point_sampler,uv_n,0);low=min(low,s);high=max(high,s);}
     return lerp(current,clamp(history,low,high),saturate(control.y));
 }
 float4 resolved_lighting(float2 uv) {
@@ -228,7 +231,14 @@ float4 Composite(Varying v) : SV_Target {
         float weight=bilinear*exp(-abs(center_distance-neighbour)/max(.1,center_distance*.02));
         accumulated+=resolved_lighting(uv)*weight;total+=weight;
     }
-    float4 lighting=total>.00001?accumulated/total:resolved_lighting(v.uv);
+    float4 lighting=accumulated/max(total,.00001);
+    // No half-resolution neighbour matches this pixel's depth (a thin branch or a
+    // silhouette against the sky): take the nearest-depth texel from a wider
+    // window instead of the sky's fog, which would leave a bright outline.
+    if(total<.1){float best=1e30;
+        [unroll]for(int y=-1;y<3;++y)[unroll]for(int x=-1;x<3;++x){float2 uv=(base+float2(x,y)+.5)/float2(w,h);
+            float difference=abs(view_distance(scene_depth.SampleLevel(point_sampler,uv,0))-center_distance);
+            if(difference<best){best=difference;lighting=resolved_lighting(uv);}}}
     float4 original=scene_colour.SampleLevel(linear_sampler,v.uv,0);
     return float4(original.rgb*lighting.a+lighting.rgb,original.a);
 }
