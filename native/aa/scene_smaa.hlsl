@@ -30,9 +30,31 @@ float4 Weights(Varying v) : SV_Target {
     float2 pixel;float4 offset[3];SMAABlendingWeightCalculationVS(v.uv,pixel,offset);
     return SMAABlendingWeightCalculationPS(v.uv,pixel,offset,source_image,area_or_weights,search_image,float4(0,0,0,0));
 }
+// The game draws its clouds and distant grass with a fixed 2x2 screen-door
+// dither for transparency. It never moves, so TAA cannot average it away and
+// sharpening makes it worse. Where a pixel and its diagonals sit on one level
+// and its four sides on another, both evenly, it is that checker: replace it
+// with the checker's average. Real edges, lines and single bright specks
+// fail the evenness tests and are left alone.
+float3 undither(float2 uv,float3 c){
+    float2 p=render_metrics.xy;float3 luma=float3(.299,.587,.114);
+    float3 n=source_image.SampleLevel(PointSampler,uv-float2(0,p.y),0).rgb,s=source_image.SampleLevel(PointSampler,uv+float2(0,p.y),0).rgb;
+    float3 w=source_image.SampleLevel(PointSampler,uv-float2(p.x,0),0).rgb,e=source_image.SampleLevel(PointSampler,uv+float2(p.x,0),0).rgb;
+    float3 a=source_image.SampleLevel(PointSampler,uv+float2(-p.x,-p.y),0).rgb,b=source_image.SampleLevel(PointSampler,uv+float2(p.x,-p.y),0).rgb;
+    float3 g=source_image.SampleLevel(PointSampler,uv+float2(-p.x,p.y),0).rgb,h=source_image.SampleLevel(PointSampler,uv+float2(p.x,p.y),0).rgb;
+    float4 sides=float4(dot(n,luma),dot(s,luma),dot(w,luma),dot(e,luma)),corners=float4(dot(a,luma),dot(b,luma),dot(g,luma),dot(h,luma));
+    float C=dot(c,luma),S=dot(sides,.25),D=dot(corners,.25);
+    float across=C-S,diagonal=D-S;
+    float agree=across*diagonal>0?min(abs(across),abs(diagonal))/max(max(abs(across),abs(diagonal)),.0001):0;
+    float spread=(max(max(sides.x,sides.y),max(sides.z,sides.w))-min(min(sides.x,sides.y),min(sides.z,sides.w)))+(max(max(corners.x,corners.y),max(corners.z,corners.w))-min(min(corners.x,corners.y),min(corners.z,corners.w)));
+    float k=agree*saturate(1-spread/max(abs(across),.0001))*saturate((abs(across)-.008)*60);
+    float3 average=((c+(a+b+g+h)*.25)*.5+(n+s+w+e)*.25)*.5;
+    return lerp(c,average,k);
+}
 float4 Resolve(Varying v) : SV_Target {
     float4 offset;SMAANeighborhoodBlendingVS(v.uv,offset);
     float4 result=SMAANeighborhoodBlendingPS(v.uv,offset,source_image,area_or_weights);
+    result.rgb=undither(v.uv,result.rgb);
     // Optional extra spatial edge treatment. Never samples HUD pixels, never
     // accumulates history, and leaves flat regions and straight edges alone.
     if(smoothing.x>0) {
@@ -71,7 +93,7 @@ float2 previous_uv(float3 relative,out float z){z=dot(relative,previous_forward.
 // history keeps its hue relationship rather than turning into a bright fringe.
 float3 clip_box(float3 h,float3 low,float3 high){float3 c=(low+high)*.5,e=(high-low)*.5+.0001,d=h-c;float3 a=abs(d/e);float m=max(a.x,max(a.y,a.z));return m>1?c+d/m:h;}
 float4 Temporal(Varying v) : SV_Target {
-    float3 current=source_image.SampleLevel(PointSampler,v.uv,0).rgb;
+    float3 current=undither(v.uv,source_image.SampleLevel(PointSampler,v.uv,0).rgb);
     float distance=pixel_distance(v.uv);
     if(smoothing.w<.5)return float4(current,distance);
     // 3x3 neighbourhood: min/max box and mean/variance in YCoCg, plus the
