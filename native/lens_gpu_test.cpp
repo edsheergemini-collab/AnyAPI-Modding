@@ -7,8 +7,10 @@
 #include <DirectXPackedVector.h>
 #include <cassert>
 #include <cmath>
+#include <cstdio>
 #include <functional>
 #include <iostream>
+#include <stdexcept>
 #include <vector>
 #include "effects/lens_gpu.h"
 using Microsoft::WRL::ComPtr;
@@ -17,11 +19,15 @@ using namespace DirectX::PackedVector;
 // background blurs and the band stays sharp; turning the camera blurs the
 // background but not things within a metre; alpha is kept; both off changes
 // nothing.
-int main(){std::cout<<std::unitbuf;
+// WARP can drop the device when the machine is busy (seen right after the other
+// GPU tests). That is retried once on a fresh device; pixel checks never are.
+struct DeviceLost:std::runtime_error{using std::runtime_error::runtime_error;};
+static void body(){
  ComPtr<ID3D12Debug> debug;if(SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))))debug->EnableDebugLayer();
  ComPtr<IDXGIFactory4> factory;assert(SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))));ComPtr<IDXGIAdapter> adapter;assert(SUCCEEDED(factory->EnumWarpAdapter(IID_PPV_ARGS(&adapter))));ComPtr<ID3D12Device> device;assert(SUCCEEDED(D3D12CreateDevice(adapter.Get(),D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device))));
  D3D12_COMMAND_QUEUE_DESC qd{};ComPtr<ID3D12CommandQueue> queue;assert(SUCCEEDED(device->CreateCommandQueue(&qd,IID_PPV_ARGS(&queue))));ComPtr<ID3D12Fence> fence;assert(SUCCEEDED(device->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&fence))));HANDLE event=CreateEventW(nullptr,FALSE,FALSE,nullptr);UINT64 serial{};
- auto wait=[&]{assert(SUCCEEDED(queue->Signal(fence.Get(),++serial)));assert(SUCCEEDED(fence->SetEventOnCompletion(serial,event)));assert(WaitForSingleObject(event,10000)==WAIT_OBJECT_0);};
+ auto lost=[&](const char* where,HRESULT hr){char text[160];snprintf(text,sizeof(text),"%s failed hr=0x%08lx removed=0x%08lx",where,(unsigned long)hr,(unsigned long)device->GetDeviceRemovedReason());throw DeviceLost(text);};
+ auto wait=[&]{if(HRESULT hr=queue->Signal(fence.Get(),++serial);FAILED(hr))lost("Signal",hr);assert(SUCCEEDED(fence->SetEventOnCompletion(serial,event)));assert(WaitForSingleObject(event,10000)==WAIT_OBJECT_0);if(HRESULT hr=device->GetDeviceRemovedReason();FAILED(hr))lost("Wait",hr);};
  ComPtr<ID3D12CommandAllocator> allocator;ComPtr<ID3D12GraphicsCommandList> list;assert(SUCCEEDED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&allocator))));assert(SUCCEEDED(device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,allocator.Get(),nullptr,IID_PPV_ARGS(&list))));assert(SUCCEEDED(list->Close()));
  const UINT W=256,H=256;
  struct Texture{ComPtr<ID3D12Resource> resource,upload,readback;D3D12_RESOURCE_DESC desc{};D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};UINT64 bytes{};};
@@ -42,7 +48,7 @@ int main(){std::cout<<std::unitbuf;
   D3D12_RESOURCE_BARRIER b[2]={scene_lens_gpu::barrier(target.resource.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_RENDER_TARGET),scene_lens_gpu::barrier(depth.resource.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COMMON)};list->ResourceBarrier(2,b);
   assert(gpu.record(list.Get(),target.resource.Get(),{depth.resource.Get(),D3D12_RESOURCE_STATE_COMMON},f));
   b[0]=scene_lens_gpu::barrier(target.resource.Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_COPY_SOURCE);list->ResourceBarrier(1,b);copy(target,false);assert(SUCCEEDED(list->Close()));ID3D12CommandList* lists[]={list.Get()};queue->ExecuteCommandLists(1,lists);wait();
-  unsigned char* pixels{};D3D12_RANGE range{0,SIZE_T(target.bytes)};assert(SUCCEEDED(target.readback->Map(0,&range,(void**)&pixels)));
+  unsigned char* pixels{};D3D12_RANGE range{0,SIZE_T(target.bytes)};if(HRESULT hr=target.readback->Map(0,&range,(void**)&pixels);FAILED(hr))lost("Map",hr);
   for(UINT y=0;y<H;++y)for(UINT x=0;x<W;++x){auto h=(const HALF*)(pixels+target.footprint.Offset+y*target.footprint.Footprint.RowPitch)+x*4;for(int i=0;i<4;++i)out[(y*W+x)*4+i]=XMConvertHalfToFloat(h[i]);}
   D3D12_RANGE none{0,0};target.readback->Unmap(0,&none);return out;};
  auto base=[&]{scene_lens_gpu::Frame f;f.metrics={1.f/W,1.f/H,float(W),float(H)};f.right={1,0,0,.5f};f.up={0,1,0,.5f};f.forward={0,0,1,5000};f.projection={0,near_plane,1,0};f.camera_move={0,0,0,1};f.params={0,0,12,0};return f;};
@@ -58,3 +64,4 @@ int main(){std::cout<<std::unitbuf;
  auto bad=base();bad.params[2]=0;wait();assert(SUCCEEDED(allocator->Reset()));assert(SUCCEEDED(list->Reset(allocator.Get(),nullptr)));assert(!gpu.record(list.Get(),nullptr,{},bad));assert(SUCCEEDED(list->Close()));
  std::cout<<"PASS: lens "<<cases<<" D3D12 cases\n";CloseHandle(event);
 }
+int main(){std::cout<<std::unitbuf;try{body();}catch(const DeviceLost& first){std::cout<<"Device lost ("<<first.what()<<"), retrying once on a new device"<<std::endl;try{body();}catch(const DeviceLost& again){std::cout<<"FAIL: device lost again ("<<again.what()<<")"<<std::endl;return 1;}}}
