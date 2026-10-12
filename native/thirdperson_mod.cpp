@@ -5,7 +5,8 @@
 // client_scene.get_camera_transform (what rendering, the crosshair and interaction rays all use) offsets the view by
 // that distance when the camera is not first person. This mod hooks get_camera_transform, sets those three fields on
 // the scene it is called with, and lets the game do the rest, so the player's body, aiming and interactions follow
-// the game's own third-person rules.
+// the game's own third-person rules. The local player's head is hidden by actor_character.render unless the
+// developer global g_is_debug_render_first_person_head is set, so that is switched on while in third person too.
 //
 // Safety net: the first frames in third person are calibrated against the local player's facing. If the game's
 // offset points forward the distance is negated; if the game does not move the camera at all, the mod moves it
@@ -88,6 +89,8 @@ int g_own_axis = 2;                // Own mode: index of the mat33 basis vector 
 double g_own_sign = 1;
 int g_calibration_tries;
 uint8_t* g_scene;                  // last scene seen
+bool* g_head;                      // g_is_debug_render_first_person_head, or null if not located
+bool g_head_orig;
 bool g_touched;                    // g_scene currently carries our third-person values
 double g_scene_orig_dist;
 double g_current = kDefaultDistance;
@@ -115,11 +118,13 @@ void write_third_person(uint8_t* scene, double dist) {
     wr<bool>(scene, off::camera_first_person, false);
     wr<bool>(scene, off::render_player_third, true);
     wr<double>(scene, off::third_person_dist, dist);
+    if (g_head) *g_head = true;
     g_touched = true;
 }
 void restore_first_person(uint8_t* scene) {
     wr<bool>(scene, off::camera_first_person, true);
     wr<double>(scene, off::third_person_dist, g_scene_orig_dist);
+    if (g_head) *g_head = g_head_orig;
     g_touched = false;
 }
 
@@ -277,6 +282,10 @@ void install_hooks() {
         void** cell = hook_cell(bind::client_scene_get_camera_transform);
         if (!cell) { if (attempt == 179) log(2, "could not locate client_scene.get_camera_transform; ThirdPerson is off"); continue; }
         if (!h_transform.install(cell, (void*)&hk_transform)) { log(2, "the camera hook cell was already taken or not writable; ThirdPerson is off"); return; }
+        if (auto head = static_cast<bool*>(global(bind::g_render_first_person_head))) {
+            std::lock_guard lock(g_cam_mutex);
+            g_head = head; g_head_orig = *head;
+        } else log(1, "head render flag not located: your character's head may be missing in third person");
         g_ready = true;
         log(0, "Ready after %d s. Press F5 (or your Controls binding) in game to switch camera.", attempt);
         return;

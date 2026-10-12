@@ -29,7 +29,8 @@ Anymaker 0.1.24 already contains a third-person camera that only its developer t
 scene has a "camera first person" flag, a "render the player in third person" flag and a third-person camera
 distance, and `client_scene.get_camera_transform` (used by rendering, the crosshair and interaction rays)
 applies them. ThirdPerson hooks that function and sets those three values, so the game draws your character's
-body and aims interactions from the camera with its own rules.
+body and aims interactions from the camera with its own rules. The game also hides your own head unless a
+developer flag is set, so the mod sets that flag while you are in third person.
 
 For the first frames in third person the mod checks the camera's offset against your character's facing. If the
 game's offset points forward it flips the distance; if the game does not move the camera at all, the mod moves it
