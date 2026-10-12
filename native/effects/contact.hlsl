@@ -47,10 +47,15 @@ float4 Contact(Varying v) : SV_Target {
     float z = view_z(d); float3 p = ray * z;
     float fade = 1 - smoothstep(params.w * .6, params.w, z);
     float3 n = normalize(n4.xyz), l = normalize(sun.xyz);
-    float facing = saturate(dot(n, l));
+    float facing = dot(n, l);
     float4 a = albedo.SampleLevel(point_sampler, v.uv, 0);
-    float lit = facing + a.w;
-    if (fade <= 0 || lit <= 0) return scene;
+    // Surfaces turned away from the sun are already in the game's own shadow; a
+    // ray from them toward the sun only pierces their own surface. Shadowing
+    // them removed rim light the game never added and darkened whole interior
+    // walls, leaving a bright band where the rays left the screen.
+    float toward = saturate((facing - .05) / .15);
+    float lit = saturate(facing) + a.w;
+    if (fade <= 0 || toward <= 0) return scene;
     // Start off the surface so it cannot shadow itself, then march toward the sun.
     float3 start = p + n * (.02 + z * .001);
     float jitter = noise(v.position.xy + params.z * 5.588238);
@@ -64,7 +69,7 @@ float4 Contact(Varying v) : SV_Target {
         float behind = qz - view_z(sd);
         if (behind > .005 + qz * .0005 && behind < params.y) { float2 edge = min(uv, 1 - uv); occlusion = saturate(min(edge.x, edge.y) * 20); break; }
     }
-    occlusion *= fade * sun.w;
+    occlusion *= fade * sun.w * toward;
     if (occlusion <= 0) return scene;
     float3 direct = a.rgb * sun_colour.rgb * lit * .4;
     float3 floor_light = a.rgb * (sky_colour.rgb * (.5 + .5 * n.y) + back_colour.rgb * max(dot(n.xz, l.xz), 0)) * .4;

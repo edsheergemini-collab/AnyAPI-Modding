@@ -98,7 +98,8 @@ Where a step lands behind the depth buffer within a short thickness, the
 pixel's sunlight is removed. That sunlight is rebuilt from the G-buffer and
 the game's own sun colour (`albedo × sun × (N·L + rim) × 0.4`), and the result
 never drops below the pixel's ambient and back light, so pixels the game
-already shadows are left alone. The pass fades out as the sun sets.
+already shadows are left alone, and only surfaces turned toward the sun are
+shadowed (surfaces facing away are in the game's own shadow already). The pass fades out as the sun sets.
 
 ## Bounce light
 

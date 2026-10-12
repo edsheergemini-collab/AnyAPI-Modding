@@ -30,7 +30,7 @@ int main(){std::cout<<std::unitbuf;
  auto fill=[&](Texture& t,const std::function<void(unsigned char*,UINT,UINT)>& write){unsigned char* data{};D3D12_RANGE none{0,0};assert(SUCCEEDED(t.upload->Map(0,&none,(void**)&data)));for(UINT y=0;y<H;++y)for(UINT x=0;x<W;++x)write(data+t.footprint.Offset+y*t.footprint.Footprint.RowPitch,x,y);t.upload->Unmap(0,nullptr);copy(t,true);};
  scene_contact_gpu::Gpu gpu;const float near_plane=.1f,lit_colour=.5f*(.70710678f+.2f*.5f)*.4f,floor_colour=.5f*.2f*.5f*.4f;
  // Camera looks along +z at a wall 10 m away; the left half has a slab 0.5 m in front of it.
- auto run=[&](const scene_contact_gpu::Frame& f){std::vector<float> out(W*H*4);
+ auto run=[&](const scene_contact_gpu::Frame& f,float rim=0){std::vector<float> out(W*H*4);
   wait();assert(SUCCEEDED(allocator->Reset()));assert(SUCCEEDED(list->Reset(allocator.Get(),nullptr)));
   auto target=texture(DXGI_FORMAT_R16G16B16A16_FLOAT,true),depth=texture(DXGI_FORMAT_R32_FLOAT,false),normals=texture(DXGI_FORMAT_R16G16B16A16_FLOAT,false),albedo=texture(DXGI_FORMAT_R16G16B16A16_FLOAT,false);
   assert(gpu.ensure(device.Get(),queue.Get(),target.desc));
@@ -38,7 +38,7 @@ int main(){std::cout<<std::unitbuf;
   fill(target,[&](unsigned char* p,UINT x,UINT){rgba(p,x,lit_colour,lit_colour,lit_colour,.25f);});
   fill(depth,[&](unsigned char* p,UINT x,UINT){((float*)p)[x]=near_plane/(x<32?9.5f:10.f);});
   fill(normals,[&](unsigned char* p,UINT x,UINT){rgba(p,x,0,0,-1,0);});
-  fill(albedo,[&](unsigned char* p,UINT x,UINT){rgba(p,x,.5f,.5f,.5f,0);});
+  fill(albedo,[&](unsigned char* p,UINT x,UINT){rgba(p,x,.5f,.5f,.5f,rim);});
   D3D12_RESOURCE_BARRIER b[4]={scene_contact_gpu::barrier(target.resource.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_RENDER_TARGET),scene_contact_gpu::barrier(depth.resource.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),scene_contact_gpu::barrier(normals.resource.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COMMON),scene_contact_gpu::barrier(albedo.resource.Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COMMON)};list->ResourceBarrier(4,b);
   using I=scene_contact_gpu::Gpu::Input;const auto read=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,common=D3D12_RESOURCE_STATE_COMMON;
   assert(gpu.record(list.Get(),target.resource.Get(),I{depth.resource.Get(),read},I{normals.resource.Get(),common},I{albedo.resource.Get(),common},f));
@@ -52,6 +52,8 @@ int main(){std::cout<<std::unitbuf;
  {auto o=run(base());float beside=1;for(UINT x=33;x<36;++x)beside=std::min(beside,o[(32*W+x)*4]);float open=o[(32*W+60)*4],slab=o[(32*W+16)*4];
   std::cout<<"Contact beside="<<beside<<" open="<<open<<" slab="<<slab<<" floor="<<floor_colour<<'\n';assert(beside<lit_colour*.5f&&beside>=floor_colour-.003f&&std::abs(open-lit_colour)<.002f&&std::abs(slab-lit_colour)<.002f);
   for(UINT i=0;i<W*H;++i)assert(o[i*4+3]==.25f);cases+=2;}
+ // Sun behind the wall: the game already shadows it, so even with rim light nothing is darkened.
+ {auto f=base();f.sun={.70710678f,0,.70710678f,1};auto o=run(f,.5f);for(UINT i=0;i<W*H;++i)assert(std::abs(o[i*4]-lit_colour)<.002f);std::cout<<"Facing away unchanged\n";++cases;}
  {auto f=base();f.sun[3]=0;auto o=run(f);for(UINT i=0;i<W*H;++i)assert(std::abs(o[i*4]-lit_colour)<.002f);std::cout<<"Strength 0 unchanged\n";++cases;}
  auto bad=base();bad.params[0]=0;wait();assert(SUCCEEDED(allocator->Reset()));assert(SUCCEEDED(list->Reset(allocator.Get(),nullptr)));using I=scene_contact_gpu::Gpu::Input;assert(!gpu.record(list.Get(),nullptr,I{},I{},I{},bad));assert(SUCCEEDED(list->Close()));
  std::cout<<"PASS: contact shadows "<<cases<<" D3D12 cases\n";CloseHandle(event);
