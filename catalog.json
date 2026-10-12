@@ -259,14 +259,14 @@
     {
       "Id": "anymirror",
       "Name": "AnyMirror",
-      "Version": "1.0.0",
-      "Revision": 1,
+      "Version": "1.1.0",
+      "Revision": 2,
       "MinimumApi": 34,
-      "Description": "Mirrored edge building with either edge tool, a toggleable mirror wall and keybinds. Uses the experimental SDK; Anymaker 0.1.24 only.",
-      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/v0.35.0/AnyMirror-1.0.0.zip",
-      "Sha256": "e9a581a9c5d315488cde0541c8f3349bc9ea8a7759acd02738547eb1e56fe8c3",
+      "Description": "Mirrored building across a toggleable mirror wall: edges with either edge tool, plates with the add plate tool, and removals with the remove tool. Keybinds and a wall strength slider. Uses the experimental SDK; Anymaker 0.1.24 only.",
+      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/mods-2026.10.12.1/AnyMirror-1.1.0.zip",
+      "Sha256": "d62fac8679e3f5d9e1067d28a7294c1c4c1d83c5c9c8d5582ee167f4363eaf5b",
       "FileHashes": {
-        "AnyAPI and Modding/mods/AnyMirror.dll": "9adac0cd63c7e97798332b69ac483d05a45fb1c34f183689c8260e4cddd01aa8"
+        "AnyAPI and Modding/mods/AnyMirror.dll": "4eb4f9c5269b50abeb965ed326c82e25b6a7d2b447633318a68b08075fe93403"
       },
       "GameBuilds": [
         {
