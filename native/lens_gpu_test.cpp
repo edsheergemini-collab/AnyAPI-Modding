@@ -11,6 +11,7 @@
 #include <functional>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 #include "effects/lens_gpu.h"
 using Microsoft::WRL::ComPtr;
@@ -64,4 +65,7 @@ static void body(){
  auto bad=base();bad.params[2]=0;wait();assert(SUCCEEDED(allocator->Reset()));assert(SUCCEEDED(list->Reset(allocator.Get(),nullptr)));assert(!gpu.record(list.Get(),nullptr,{},bad));assert(SUCCEEDED(list->Close()));
  std::cout<<"PASS: lens "<<cases<<" D3D12 cases\n";CloseHandle(event);
 }
-int main(){std::cout<<std::unitbuf;try{body();}catch(const DeviceLost& first){std::cout<<"Device lost ("<<first.what()<<"), retrying once on a new device"<<std::endl;try{body();}catch(const DeviceLost& again){std::cout<<"FAIL: device lost again ("<<again.what()<<")"<<std::endl;return 1;}}}
+// D3D12 hands back the same removed WARP device inside one process, so the
+// retry runs in a fresh copy of this test.
+static int rerun(){wchar_t path[MAX_PATH];GetModuleFileNameW(nullptr,path,MAX_PATH);std::wstring command=L"\""+std::wstring(path)+L"\" --retry";STARTUPINFOW si{sizeof(si)};PROCESS_INFORMATION pi{};if(!CreateProcessW(path,command.data(),nullptr,nullptr,FALSE,0,nullptr,nullptr,&si,&pi))return 1;WaitForSingleObject(pi.hProcess,INFINITE);DWORD code=1;GetExitCodeProcess(pi.hProcess,&code);CloseHandle(pi.hThread);CloseHandle(pi.hProcess);return int(code);}
+int main(int argc,char**argv){std::cout<<std::unitbuf;bool retry=argc>1&&std::string(argv[1])=="--retry";try{body();}catch(const DeviceLost& lost){if(retry){std::cout<<"FAIL: device lost again ("<<lost.what()<<")"<<std::endl;return 1;}std::cout<<"Device lost ("<<lost.what()<<"), retrying once in a new process"<<std::endl;return rerun();}return 0;}
