@@ -9,7 +9,7 @@ struct Option {const char* id;const char* group;const char* label;const char* de
 static constexpr Option definitions[]={
  {"enabled","General","Enable AnyGraphics","Use the selected native graphics settings. Off restores the game's own settings.",ANY_SETTING_BOOL,1,0,1,1},
  {"gameplay_only","General","Gameplay only","Apply native overrides during gameplay; bypass them in menus and inventories.",ANY_SETTING_BOOL,1,0,1,1},
- {"quality_profile","General","Preset","Off restores game settings. Other profiles provide starting values; individual choices can be changed below. Cinematic favours looks over frame rate.",ANY_SETTING_CHOICE,3,0,6,1},
+ {"quality_profile","General","Preset","Off keeps the game's look. Performance to Cinematic trade frame rate for looks; Natural, Vibrant and Moody are styles. Presets show a few common settings; Custom shows them all, starting from your last preset.",ANY_SETTING_CHOICE,3,0,10,1},
  {"advanced","General","Advanced options","Show lighting strength and scene-detail choices.",ANY_SETTING_BOOL,0,0,1,1},
  {"native_aa","Scene","Antialiasing","Choose native FXAA or scene AA before the HUD. SMAA replaces FXAA; Enhanced SMAA adds subpixel smoothing. TAA blends recent frames to stop shimmer; TAA + jitter is the smoothest and can trail slightly behind fast motion.",ANY_SETTING_CHOICE,2,0,6,1},
  {"native_bloom","Scene","Bloom","Use the game setting, turn bloom off, or choose the strength of native bloom.",ANY_SETTING_CHOICE,2,0,2,1},
@@ -84,28 +84,42 @@ inline constexpr Index order[]={Enabled,GameplayOnly,Preset,Advanced,NativeAA,AA
  Atmosphere,SunShafts,ShaftIntensity,ShaftClarity,BeamReach,SunResponse,BeamFocus,LightingQuality,TemporalLighting,GroundFog,LocalBeams,LocalIntensity,LocalBudget,CostReadout};
 static_assert(std::size(order)==Count);
 template<size_t N> inline uint32_t nearest(float value,const float(&levels)[N]){uint32_t best=0;for(uint32_t i=1;i<N;++i)if(std::abs(value-levels[i])<std::abs(value-levels[best]))best=i;return best;}
+// Preset choices: 0 Off, 1-6 Performance..Cinematic, then the looks and Custom.
+inline constexpr int NaturalProfile=7,VibrantProfile=8,MoodyProfile=9,CustomProfile=10;
+// Presets show only these rows; Custom shows every row.
+inline bool common(size_t i){return i==Enabled||i==GameplayOnly||i==Preset||i==NativeAA||i==Brightness||i==ColourLook||i==FogDensity||i==DepthOfField||i==FocusBlur||i==MotionBlur||i==DrawDistance||i==CostReadout;}
 inline Values profile(const Values& current,int level){
- auto v=defaults();for(auto i:{Enabled,GameplayOnly,Advanced,CostReadout})v[i]=current[i];v[Preset]=float(level);
  if(!level)return current; // Off bypasses overrides and keeps the previous individual choices.
+ // Custom starts from the current values so tweaks begin where the last preset left off.
+ if(level==CustomProfile){auto v=current;v[Preset]=float(level);return v;}
+ auto v=defaults();for(auto i:{Enabled,GameplayOnly,Advanced,CostReadout})v[i]=current[i];v[Preset]=float(level);
+ // Looks start from a quality tier: Natural and Moody from High, Vibrant from Ultra.
  // Index 0..5: Performance, Low, Medium, High, Ultra, Cinematic.
- auto tier=size_t(level-1);
+ auto tier=size_t(level==VibrantProfile?4:level>=NaturalProfile?3:level-1);
  static constexpr float aa[]={2,3,3,5,6,6},aa_quality[]={1,1,2,2,3,3},sharpen[]={0,0,0,1,1,2};
  v[NativeAA]=aa[tier];v[AAQuality]=aa_quality[tier];v[Sharpening]=sharpen[tier];
  v[NativeSSAO]=level>=3?2.f:1.f;static constexpr float ao[]={0,0,0,1,2,2};v[DetailedAO]=ao[tier];static constexpr float night[]={0,1,2,2,2,3},moon[]={0,1,2,2,2,2};v[NightSky]=night[tier];v[Moonlight]=moon[tier];static constexpr float contact[]={0,0,1,2,2,3};v[ContactShadows]=contact[tier];static constexpr float bounce[]={0,0,0,1,2,3};v[BounceLight]=bounce[tier];static constexpr float lens[]={0,0,0,0,0,1};v[DepthOfField]=lens[tier];v[MotionBlur]=lens[tier];static constexpr float object_reach[]={0,0,0,1,1,2};v[DrawDistance]=object_reach[tier];static constexpr float sun_levels[]={0,1,2,2,2,2},cloud_tiers[]={0,0,1,2,2,2};v[SunDisc]=sun_levels[tier];v[CloudLayer]=cloud_tiers[tier];v[NativeShadows]=level>=2?2.f:1.f;v[NativeFogBlur]=level>=3?2.f:1.f;
  static constexpr float bloom[]={0,.05f,.1f,.2f,.35f,.35f};v[NativeBloom]=level>=2?2.f:1.f;v[BloomAmount]=bloom[tier];v[BloomThreshold]=.75f;
  // Fog and beams are artistic strengths, not sample quality. High tiers add
- // samples and lights but keep fog moderate so beams never wash out the scene.
- static constexpr float atmosphere[]={0,0,1,1,2,2},beams[]={0,1,2,2,3,3},local[]={0,1,2,3,3,4},quality[]={0,0,1,2,3,3};
- static constexpr float sun_intensity[]={1,1,1,1,1,1.3f},local_intensity[]={1,1,1,1,1.1f,1.3f},focus[]={1,1,1,1,2,2},clarity[]={1,1,1,1,1,2},reach[]={0,0,1,1,2,2},fog[]={0,.35f,.65f,.65f,1,1};
+ // samples and lights but keep fog light: no preset goes past Low volumetric
+ // fog or Medium base fog, since thick fog washes the whole scene out.
+ static constexpr float atmosphere[]={0,0,1,1,1,1},beams[]={0,1,2,2,3,3},local[]={0,1,2,3,3,4},quality[]={0,0,1,2,3,3};
+ static constexpr float sun_intensity[]={1,1,1,1,1,1.3f},local_intensity[]={1,1,1,1,1.1f,1.3f},focus[]={1,1,1,1,2,2},clarity[]={1,1,1,1,1,1},reach[]={0,0,1,1,2,2},fog[]={0,.35f,.65f,.65f,.65f,.65f};
  v[Atmosphere]=atmosphere[tier];v[SunShafts]=beams[tier];v[LocalBeams]=local[tier];v[LightingQuality]=v[LocalBudget]=quality[tier];
  v[ShaftIntensity]=sun_intensity[tier];v[LocalIntensity]=local_intensity[tier];v[BeamFocus]=focus[tier];v[GroundFog]=0;
  v[ShaftClarity]=clarity[tier];v[BeamReach]=reach[tier];v[SunResponse]=1;v[TemporalLighting]=1;
  // Finishing: Filmic from Low up, the shader-pack look from Ultra.
  static constexpr float tone[]={0,2,2,2,2,2},look[]={0,0,0,0,5,5},strength[]={1,1,1,1,1,2},scene_bloom[]={0,1,1,2,2,3},glare[]={0,1,1,2,2,2},vignette[]={0,0,0,0,1,1};
  v[ToneMapping]=tone[tier];v[ColourLook]=look[tier];v[LookStrength]=strength[tier];v[EyeAdaptation]=1;v[Brightness]=0;v[SceneBloom]=scene_bloom[tier];v[SunGlare]=glare[tier];v[Vignette]=vignette[tier];
- v[Clouds]=level==1?1.f:0.f;v[Grass]=level<=2?1.f:0.f;v[Foliage]=0;v[FogDensity]=fog[tier];return v;
+ v[Clouds]=level==1?1.f:0.f;v[Grass]=level==1||level==2?1.f:0.f;v[Foliage]=0;v[FogDensity]=fog[tier];
+ if(level==NaturalProfile){ // The game's own colours, only cleaner.
+  v[ToneMapping]=3;v[ColourLook]=0;v[Vignette]=0;v[SceneBloom]=1;v[SunGlare]=1;v[Atmosphere]=0;v[SunShafts]=1;v[SunDisc]=1;v[CloudLayer]=1;v[NightSky]=1;v[Moonlight]=1;}
+ else if(level==VibrantProfile){ // The bright shader-pack look: rich colour, big skies, clear beams.
+  v[ColourLook]=5;v[LookStrength]=2;v[SceneBloom]=2;v[SunGlare]=2;v[SunShafts]=3;v[ShaftIntensity]=1.2f;v[ShaftClarity]=0;v[FogDensity]=.35f;v[SunDisc]=3;v[CloudLayer]=3;v[NightSky]=3;v[Moonlight]=2;v[BounceLight]=2;v[ContactShadows]=2;}
+ else if(level==MoodyProfile){ // Darker grade, strong beams and a little haze.
+  v[ColourLook]=4;v[LookStrength]=1;v[Vignette]=2;v[SunShafts]=3;v[SceneBloom]=2;v[SunGlare]=2;v[CloudLayer]=3;v[SunDisc]=1;v[NightSky]=2;v[Moonlight]=1;}
+ return v;
 }
 inline Values effective(const Values& custom){return custom;}
-inline bool advanced(size_t i){return (i>=SunLight&&i<=SceneExposure)||(i>=Clouds&&i<ShaftClarity);}
 inline float clean(size_t i,double value){auto& d=definitions[i];if(!std::isfinite(value))return d.initial;float v=float(std::clamp(value,double(d.minimum),double(d.maximum)));if(i==FogDensity)return fog_levels[nearest(v,fog_levels)];if(i==SunLight||i==SkyLight||i==AmbientLight)return light_levels[nearest(v,light_levels)];if(i==BloomAmount&&v>0)return bloom_levels[nearest(v,bloom_levels)];if(std::abs(v-d.initial)<d.step*.0001f)v=d.initial;return d.kind==ANY_SETTING_BOOL||d.kind==ANY_SETTING_CHOICE?std::round(v):v;}
 }

@@ -88,13 +88,19 @@ setting. These levels change native intensity inputs; they are not separate
 shadow-map or SSAO sampling-quality modes. Shadows, ambient occlusion and fog
 blur retain the game's actual on/off capability.
 
-Presets are **Off / Performance / Low / Medium / High / Ultra / Cinematic**. Choosing a
-profile stages a group of settings; individual choices may then be changed.
-Off bypasses overrides and restores the game's own values. Medium is the
-initial profile. Advanced options reveals sunlight, sky and ambient strength,
-plus native Cloud rendering, Grass rendering and Foliage rendering switches.
-Each detail switch offers Game setting / Off / On and changes rendering only;
-world objects and collision remain intact. Numeric controls are hidden.
+Presets are **Off / Performance / Low / Medium / High / Ultra / Cinematic /
+Natural / Vibrant / Moody / Custom**. Choosing a preset stages a group of
+settings. Off bypasses overrides and restores the game's own values. Medium is
+the initial preset.
+
+Every preset except Custom shows only a few common settings: Antialiasing,
+Fog, Brightness, Colour look, Depth of field (with Blur strength), Motion blur,
+Object draw distance and Show GPU cost. Changing one of them keeps the preset.
+**Custom** shows every setting and starts from the values of the preset you
+were on, so a look can be fine-tuned from the closest preset.
+
+No preset goes past Low volumetric fog or Medium base fog, because thick fog
+washes out the whole scene. More fog is available in Custom.
 
 | Preset | Native settings | Antialiasing |
 | --- | --- | --- |
@@ -103,8 +109,12 @@ world objects and collision remain intact. Numeric controls are hidden.
 | Low | Shadows on, low bloom/base fog; SSAO, fog blur and grass off | SMAA Medium |
 | Medium | Native effects on; medium bloom/base fog | SMAA High |
 | High | Native effects on; high bloom, medium base fog | TAA High, sharpening Low |
-| Ultra | Native effects on; ultra bloom, high base fog | TAA + jitter Ultra, sharpening Low |
-| Cinematic | As Ultra, with stronger beams and local lights | TAA + jitter Ultra, sharpening Medium |
+| Ultra | Native effects on; ultra bloom, medium base fog, Vivid look | TAA + jitter Ultra, sharpening Low |
+| Cinematic | As Ultra, with stronger beams, local lights, depth of field and motion blur | TAA + jitter Ultra, sharpening Medium |
+| Natural | High, with Clean tone mapping, no colour look or vignette, softer bloom and glare, no volumetric fog | TAA High, sharpening Low |
+| Vibrant | Ultra, with a strong Vivid look, many clouds, a bright sun and stars, strong clear sun beams and low base fog | TAA + jitter Ultra, sharpening Low |
+| Moody | High, with the Moody look, a medium vignette, strong sun beams, light haze and many clouds | TAA High, sharpening Low |
+| Custom | Every setting shown, starting from the last preset | As set |
 
 High and Ultra do not claim greater texture resolution or sample counts.
 

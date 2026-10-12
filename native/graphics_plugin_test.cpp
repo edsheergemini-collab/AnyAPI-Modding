@@ -66,6 +66,8 @@ int wmain(int argc,wchar_t** argv){std::cout<<std::unitbuf;std::cerr<<std::unitb
  if(absent){assert(!submissions);event(ANY_MENU_OPEN);stage(0,0);assert(rows()>3);event(ANY_MENU_CANCEL);}
  else if(local){
  assert(lighting_policy.enabled&&local_policy.local_strength==1&&local_policy.local_budget==4);
+ // Presets hide most rows; Custom shows every row so each one can be set.
+ apply(Preset,CustomProfile);
  apply(Atmosphere,0);apply(SunShafts,0);assert(lighting_policy.enabled&&lighting_policy.fog_strength==0&&lighting_policy.sun_shafts==0);
  apply(LocalBeams,4);apply(LocalIntensity,3);apply(LocalBudget,3);assert(local_policy.local_strength==9&&local_policy.local_budget==8);
  event(ANY_MENU_OPEN);stage(LocalIntensity+1,1);render();assert(local_policy.local_strength==9);event(ANY_MENU_CANCEL);render();assert(local_policy.local_strength==9);
@@ -73,9 +75,9 @@ int wmain(int argc,wchar_t** argv){std::cout<<std::unitbuf;std::cerr<<std::unitb
  apply(LocalBeams,0);assert(!lighting_policy.enabled);apply(LocalBeams,2);apply(Preset,0);assert(!lighting_policy.enabled);apply(Preset,3);assert(lighting_policy.enabled);
  // Exercise real menu selection and submitted policy, not just the profile helper.
  // Presets 1-6: Performance, Low, Medium, High, Ultra, Cinematic.
- const float densities[]={.002f,.002f,.001f,.001f,.002f,.002f},sun_strength[]={0,.5f,1,1,2,2.6f},local_strength[]={0,.5f,1,2,2.2f,3.9f};
+ const float densities[]={.002f,.002f,.001f,.001f,.001f,.001f},sun_strength[]={0,.5f,1,1,2,2.6f},local_strength[]={0,.5f,1,2,2.2f,3.9f};
  const uint32_t quality[]={0,0,1,2,3,3},budgets[]={2,2,4,6,8,8};
- const float clarity[]={.85f,.85f,.85f,.85f,.85f,.6f},reach[]={60,60,120,120,250,250},sharpening[]={0,0,0,.3f,.3f,.55f};const uint32_t methods[]={1,1,1,3,4,4};
+ const float clarity[]={.85f,.85f,.85f,.85f,.85f,.85f},reach[]={60,60,120,120,250,250},sharpening[]={0,0,0,.3f,.3f,.55f};const uint32_t methods[]={1,1,1,3,4,4};
  for(int preset=1;preset<=6;++preset){apply(Preset,preset);auto i=preset-1;std::cout<<"PRESET "<<preset<<" enabled="<<lighting_policy.enabled<<" density="<<lighting_policy.fog_density<<" sun="<<lighting_policy.sun_shafts<<" local="<<local_policy.local_strength<<" quality="<<lighting_policy.quality<<" budget="<<local_policy.local_budget<<" height="<<lighting_policy.height_falloff<<std::endl;assert(lighting_policy.enabled==(preset>1)&&lighting_policy.fog_density==densities[i]&&std::abs(lighting_policy.sun_shafts-sun_strength[i])<.001f&&std::abs(local_policy.local_strength-local_strength[i])<.001f&&lighting_policy.quality==quality[i]&&local_policy.local_budget==budgets[i]&&lighting_policy.height_falloff==0);
   assert(shaped_policy.clarity==clarity[i]&&shaped_policy.beam_reach==reach[i]&&shaped_policy.sun_response==1&&shaped_policy.temporal==1);
   assert(aa2_policy.enabled==(preset>1)&&(preset==1||aa2_policy.method==methods[i])&&std::abs(aa2_policy.sharpening-sharpening[i])<.001f);
@@ -92,8 +94,15 @@ int wmain(int argc,wchar_t** argv){std::cout<<std::unitbuf;std::cerr<<std::unitb
   assert(effects_policy.depth_of_field==(preset==6?.5f:0.f)&&effects_policy.motion_blur==(preset==6?.4f:0.f));
   const float reach[]={1,1,1,1.5f,1.5f,2};assert(effects_policy.draw_distance==reach[i]);
   const float sun[]={0,.6f,1,1,1,1},cloud[]={0,0,.6f,1,1,1};assert(effects_policy.sun_disc==sun[i]&&effects_policy.clouds==cloud[i]);}
+ // Looks: Natural keeps the game's colours, Vibrant is the shader-pack look, Moody a darker grade; all keep fog light.
+ apply(Preset,NaturalProfile);assert(effects_policy.tonemap==2&&effects_policy.look==0&&effects_policy.vignette==0&&lighting_policy.fog_strength==0);
+ apply(Preset,VibrantProfile);assert(effects_policy.look==5&&effects_policy.look_strength==1&&effects_policy.clouds==1.5f&&effects_policy.sun_disc==1.5f&&lighting_policy.fog_density==.001f&&shaped_policy.clarity==1);
+ apply(Preset,MoodyProfile);assert(effects_policy.look==4&&effects_policy.vignette==.5f&&lighting_policy.fog_density==.001f&&std::abs(lighting_policy.sun_shafts-2)<.001f);
+ // Presets show only the common rows; Custom keeps the current values and shows every row.
+ event(ANY_MENU_OPEN);stage(0,0);auto preset_rows=rows();event(ANY_MENU_CANCEL);
+ apply(Preset,CustomProfile);assert(effects_policy.look==4&&effects_policy.vignette==.5f);event(ANY_MENU_OPEN);stage(0,0);std::cout<<"ROWS preset="<<preset_rows<<" custom="<<rows()<<std::endl;assert(rows()>preset_rows+15);event(ANY_MENU_CANCEL);
  // Shaping rows submit their own values; the GPU cost readout polls timing while the menu draws.
- apply(Preset,3);apply(ShaftClarity,3);apply(BeamReach,3);apply(SunResponse,0);apply(TemporalLighting,0);assert(shaped_policy.clarity==0&&shaped_policy.beam_reach==0&&!shaped_policy.sun_response&&!shaped_policy.temporal);
+ apply(Preset,3);apply(Preset,CustomProfile);apply(ShaftClarity,3);apply(BeamReach,3);apply(SunResponse,0);apply(TemporalLighting,0);assert(shaped_policy.clarity==0&&shaped_policy.beam_reach==0&&!shaped_policy.sun_response&&!shaped_policy.temporal);
  apply(NativeAA,5);apply(Sharpening,3);assert(aa2_policy.enabled&&aa2_policy.method==3&&std::abs(aa2_policy.sharpening-.8f)<.001f);apply(NativeAA,6);assert(aa2_policy.method==4);apply(NativeAA,2);assert(!aa2_policy.enabled);
  event(ANY_MENU_OPEN);stage(0,0);assert(timing_reads>0&&effects_reads>0);event(ANY_MENU_CANCEL);
  apply(ToneMapping,3);apply(ColourLook,3);apply(LookStrength,0);apply(SunGlare,0);apply(Vignette,3);apply(Brightness,1);
@@ -104,7 +113,7 @@ int wmain(int argc,wchar_t** argv){std::cout<<std::unitbuf;std::cerr<<std::unitb
  event(ANY_MENU_OPEN);stage(Preset+1,1);render();assert(std::abs(local_policy.local_strength-3.9f)<.001f);event(ANY_MENU_CANCEL);render();assert(std::abs(local_policy.local_strength-3.9f)<.001f);
  apply(Enabled,0);assert(!lighting_policy.enabled);apply(Enabled,1);ui(13);render();assert(!lighting_policy.enabled);apply(GameplayOnly,0);assert(lighting_policy.enabled);
  }else {
- assert(policy.enabled&&policy.sun==1.3f);apply(Advanced,1);apply(SunLight,3);assert(policy.sun==1.15f);
+ assert(policy.enabled&&policy.sun==1.3f);apply(Preset,CustomProfile);assert(policy.sun==1.3f);apply(SunLight,3);assert(policy.sun==1.15f);
  apply(Clouds,1);apply(Grass,2);apply(Foliage,1);assert(detail_policy.clouds==1&&detail_policy.grass==2&&detail_policy.foliage==1);
  event(ANY_MENU_OPEN);stage(Clouds+1,2);render();assert(detail_policy.clouds==1);event(ANY_MENU_CANCEL);render();assert(detail_policy.clouds==1);
  event(ANY_MENU_OPEN);stage(SunLight+1,4);assert(dirty());render();assert(policy.sun==1.15f);event(ANY_MENU_CANCEL);render();assert(policy.sun==1.15f);
@@ -112,8 +121,8 @@ int wmain(int argc,wchar_t** argv){std::cout<<std::unitbuf;std::cerr<<std::unitb
  apply(NativeAA,4);assert(aa_policy.enabled&&aa_policy.method==2&&policy.aa==0);
  apply(NativeAA,1);assert(!aa_policy.enabled);apply(NativeBloom,5);assert(policy.aa==1&&policy.bloom==2&&policy.bloom_intensity==.35f);
  apply(NativeSSAO,1);apply(NativeShadows,2);apply(NativeFogBlur,1);apply(FogDensity,1);assert(policy.ssao==1&&policy.shadows==2&&policy.fog_blur==1&&policy.fog==.35f&&policy.light_exposure==0);
- for(int preset=1;preset<=6;++preset){apply(Preset,preset);auto expected=profile(defaults(),preset);assert(policy.enabled&&policy.sun==1&&policy.fog==expected[FogDensity]&&policy.ssao==uint32_t(expected[NativeSSAO])&&policy.bloom_intensity==expected[BloomAmount]);assert(detail_policy.clouds==uint32_t(expected[Clouds])&&detail_policy.grass==uint32_t(expected[Grass])&&detail_policy.foliage==0);event(ANY_MENU_OPEN);stage(0,0);assert(rows()>10);event(ANY_MENU_CANCEL);}
- assert(lighting_submissions&&lighting_policy.enabled);apply(Atmosphere,0);apply(SunShafts,0);assert(!lighting_policy.enabled);
+ for(int preset=1;preset<=6;++preset){apply(Preset,preset);auto expected=profile(defaults(),preset);assert(policy.enabled&&policy.sun==1&&policy.fog==expected[FogDensity]&&policy.ssao==uint32_t(expected[NativeSSAO])&&policy.bloom_intensity==expected[BloomAmount]);assert(detail_policy.clouds==uint32_t(expected[Clouds])&&detail_policy.grass==uint32_t(expected[Grass])&&detail_policy.foliage==0);event(ANY_MENU_OPEN);stage(0,0);assert(rows()>3);event(ANY_MENU_CANCEL);}
+ assert(lighting_submissions&&lighting_policy.enabled);apply(Preset,CustomProfile);apply(Atmosphere,0);apply(SunShafts,0);assert(!lighting_policy.enabled);
  apply(Atmosphere,3);apply(SunShafts,2);apply(ShaftIntensity,1);apply(BeamFocus,1);apply(LightingQuality,3);apply(GroundFog,2);
  assert(lighting_policy.enabled&&lighting_policy.fog_density==.004f&&lighting_policy.sun_shafts==1&&lighting_policy.quality==3&&lighting_policy.height_falloff==.025f);
  event(ANY_MENU_OPEN);stage(Atmosphere+1,4);render();assert(lighting_policy.fog_density==.004f);event(ANY_MENU_CANCEL);render();assert(lighting_policy.fog_density==.004f);
@@ -123,14 +132,14 @@ int wmain(int argc,wchar_t** argv){std::cout<<std::unitbuf;std::cerr<<std::unitb
  event(ANY_MENU_OPEN);stage(ShaftIntensity+1,4);render();assert(lighting_policy.sun_shafts==2);event(ANY_MENU_CANCEL);render();assert(lighting_policy.sun_shafts==2);
  apply(ShaftIntensity,0);assert(!lighting_policy.enabled);apply(ShaftIntensity,1);assert(lighting_policy.enabled&&lighting_policy.sun_shafts==1);
  apply(SunShafts,4);apply(ShaftIntensity,4);assert(lighting_policy.sun_shafts==12);apply(SunShafts,0);assert(!lighting_policy.enabled);
- apply(Atmosphere,2);apply(Preset,0);assert(!policy.enabled&&!aa_policy.enabled&&!lighting_policy.enabled);apply(Preset,3);assert(policy.enabled);
+ apply(Atmosphere,2);apply(Preset,0);assert(!policy.enabled&&!aa_policy.enabled&&!lighting_policy.enabled);apply(Preset,3);assert(policy.enabled);apply(Preset,CustomProfile);
  for(int level=0;level<5;++level){apply(FogDensity,level);assert(policy.fog==fog_levels[level]);}
  for(int level=2;level<6;++level){apply(NativeBloom,level);assert(policy.bloom==2&&policy.bloom_intensity==bloom_levels[level-2]);}
  event(ANY_MENU_OPEN);stage(0,0);event(ANY_MENU_RESET);assert(dirty());render();assert(policy.fog==1.5f);event(ANY_MENU_APPLY);event(ANY_MENU_CANCEL);render();assert(policy.sun==1&&policy.aa==2&&policy.bloom==2&&policy.fog==.65f);
- apply(Atmosphere,2);apply(Enabled,0);assert(!policy.enabled&&!lighting_policy.enabled);apply(Enabled,1);ui(13);render();assert(!policy.enabled&&!lighting_policy.enabled);apply(GameplayOnly,0);assert(policy.enabled);ready=false;render();ready=true;render();assert(policy.enabled);
+ apply(Preset,CustomProfile);apply(Atmosphere,2);apply(Enabled,0);assert(!policy.enabled&&!lighting_policy.enabled);apply(Enabled,1);ui(13);render();assert(!policy.enabled&&!lighting_policy.enabled);apply(GameplayOnly,0);assert(policy.enabled);ready=false;render();ready=true;render();assert(policy.enabled);
  reject_scene=true;ready=false;render();auto rejected_count=submissions;render();assert(submissions==rejected_count);reject_scene=false;frame.tick+=501;render();assert(submissions==rejected_count+1);render();assert(submissions==rejected_count+1);
 
  }
  {std::ifstream saved(root/L"AnyGraphics"/L"settings.tsv");std::string text((std::istreambuf_iterator<char>(saved)),{});assert(text.find("comparison")==std::string::npos&&text.find("sharpen")==std::string::npos);}
- FreeLibrary(graphics);FreeLibrary(fixture);std::filesystem::remove_all(root);std::cout<<"PASS: native-only Graphics section, no AnyHelpers dependency or post-FX registrations, migration, draft/apply/cancel/reset, quality levels, seven profiles, TAA, sharpening, beam shaping, GPU cost readout, gameplay bypass and unavailable service\n";
+ FreeLibrary(graphics);FreeLibrary(fixture);std::filesystem::remove_all(root);std::cout<<"PASS: native-only Graphics section, no AnyHelpers dependency or post-FX registrations, migration, draft/apply/cancel/reset, quality levels, eleven profiles, TAA, sharpening, beam shaping, GPU cost readout, gameplay bypass and unavailable service\n";
 }
