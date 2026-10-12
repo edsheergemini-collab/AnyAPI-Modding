@@ -38,5 +38,8 @@ int main(){
  wall_lattice(w,0,0.25,0.0,thin);assert(std::fabs((thin[1].max[1]-thin[1].min[1])-0.25*(1-std::sqrt(0.95)))<1e-12);
  Box big=wall(Plane{1,0},Grid{{-5000,0,-3}},Grid{{5000,0,3}},0.25,2,0.02);
  assert(wall_lattice(big,1,0.25,0.5,bars)<=kLatticeMax);
+ // Plates match whichever corner they start at; mirrored corners are reversed so the twin faces the other way.
+ int32_t pa[]={4,7,9,2},pb[]={9,2,4,7},pc[]={4,7,9,3},pd[]={4,4,7,9};assert(same_ids(pa,4,pb,4)&&!same_ids(pa,4,pc,4)&&!same_ids(pa,4,pa,3)&&!same_ids(pa,4,pd,4));
+ int32_t tw[]={10,11,12,13},rc[4];mirrored_corners(tw,4,rc);assert(rc[0]==13&&rc[1]==12&&rc[2]==11&&rc[3]==10);
  return 0;
 }
