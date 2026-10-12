@@ -99,6 +99,15 @@ Object draw distance and Show GPU cost. Changing one of them keeps the preset.
 **Custom** shows every setting and starts from the values of the preset you
 were on, so a look can be fine-tuned from the closest preset.
 
+**Reset preset** puts every setting back to the selected preset's values.
+**Auto-pick preset** measures the frame rate in gameplay for a few seconds per
+preset and steps between Performance and Ultra until the game holds about
+60 fps, then says which preset it chose. Close the menu and play while it runs.
+
+**Photo mode** hides the game's HUD, crosshair and menus. Press **F1** in
+gameplay to turn it on or off (rebindable in AnyHelpers controls), or use the
+Photo mode switch under Preset. Opening any menu shows the UI again.
+
 No preset goes past Low volumetric fog or Medium base fog, because thick fog
 washes out the whole scene. More fog is available in Custom.
 

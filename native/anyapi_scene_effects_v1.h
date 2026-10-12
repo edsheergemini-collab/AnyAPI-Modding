@@ -38,20 +38,23 @@
 //   0..2 adds a drifting cloud layer (amount of cover) lit by the sun by day
 //   and the moon by night. Both default to 0 (off) and sit behind the game's
 //   own clouds.
+// hide_ui 0/1 is photo mode: it turns on the game's own "disable UI" switch,
+//   which hides the HUD, crosshair and menus, until it is set back to 0.
+//   Turn it off whenever a menu needs to be seen.
 // Only one active mod owns the policy.
 struct AnySceneEffectsParametersV1 {uint32_t struct_size=sizeof(AnySceneEffectsParametersV1),version=1,enabled=0,finish=1,tonemap=1,look=0,eye_adaptation=1;
  float look_strength=1,exposure=0,adaptation_seconds=1.5f,bloom=.35f,glare=1,vignette=0;uint32_t ambient_occlusion=1;float ao_radius=1.5f,ao_strength=1;
  uint32_t night_sky=1;float stars=1,moon=1,moonlight=1;uint32_t contact_shadows=1;float contact_length=.6f,bounce_light=1;
- float depth_of_field=0,motion_blur=0,draw_distance=1,sun_disc=0,clouds=0;};
+ float depth_of_field=0,motion_blur=0,draw_distance=1,sun_disc=0,clouds=0;uint32_t hide_ui=0;};
 // adapted_exposure: the stops currently added by eye adaptation.
 // scene_luminance: the measured average scene luminance, for diagnostics.
 // ao_*, sky_*, contact_*, gi_* and lens_* describe the ambient occlusion,
 // night sky, contact shadow, bounce light and lens passes. distance_available
 // says the draw distance hooks are installed and distance_scale is the
-// multiplier in use.
+// multiplier in use. photo_available says hide_ui can hide the game's UI.
 struct AnySceneEffectsStatusV1 {uint32_t struct_size=sizeof(AnySceneEffectsStatusV1),version=1,available=0,ready=0;uint64_t frames=0,rejected_frames=0;
  float gpu_ms=-1,adapted_exposure=0,scene_luminance=-1,sun_visibility=0;int32_t error=0;uint32_t ao_available=0,ao_ready=0;uint64_t ao_frames=0;float ao_ms=-1;
  uint32_t sky_ready=0;float sky_ms=-1,night=0;uint32_t contact_ready=0;float contact_ms=-1;uint32_t gi_ready=0;float gi_ms=-1;
  uint32_t lens_ready=0;float lens_ms=-1;
- uint32_t distance_available=0;float distance_scale=1;};
+ uint32_t distance_available=0;float distance_scale=1;uint32_t photo_available=0;};
 struct AnySceneEffectsV1 {uint32_t struct_size,version;bool(*set)(const AnySceneEffectsParametersV1*);bool(*status)(AnySceneEffectsStatusV1*);};

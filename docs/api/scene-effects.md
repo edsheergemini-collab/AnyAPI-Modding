@@ -57,8 +57,11 @@ trip and the image is unchanged.
 | `sun_disc` | 0-2 | Sun disc in the game's sun colour; 0 (default) is off |
 | `clouds` | 0-2 | Drifting cloud layer, amount of cover; 0 (default) is off |
 | `draw_distance` | 1-4 | Multiplier on the game's object cull distances; 1 (default) is the game's own |
+| `hide_ui` | 0/1 | Photo mode: turns on the game's own disable-UI switch, hiding the HUD, crosshair and menus; 0 (default) leaves the UI alone |
 
 Only one active mod owns the policy, as with the other scene services.
+
+Turn `hide_ui` off whenever a menu needs to be seen; AnyGraphics does this whenever the player leaves gameplay. `photo_available` in the status says the switch was found.
 
 ## Eye adaptation
 
