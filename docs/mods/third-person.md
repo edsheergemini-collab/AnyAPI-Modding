@@ -2,7 +2,7 @@
 
 > ThirdPerson hooks a game function directly through the [experimental SDK](../../sdk/experimental/README.md),
 > so it only activates on Anymaker 0.1.24 / Steam build 25826614 and turns itself off on any other build.
-> Prototype: built from source, not in the catalog yet.
+> ThirdPerson 0.1.0 requires AnyAPI 0.35.0 or newer on that build; install it from the manager.
 
 ThirdPerson adds a third-person camera with an adjustable follow distance.
 
