@@ -29,8 +29,8 @@ The **Finish** rows grade the HDR scene before the game's tone mapping, using
   moment, then returns to the game's own day and night brightness.
 - **Brightness (stops)**, **Bloom**, **Sun glare** and **Vignette**.
 
-Presets use Filmic from Low up and add Vivid from Ultra; Cinematic applies it
-at Strong with strong bloom and a light vignette.
+Presets use Filmic from Low up and add Vivid on Ultra; Cinematic uses a
+strong teal & orange film grade with strong bloom and a light vignette.
 
 **Detailed shading** (Off, Low, Medium or High, next to Ambient occlusion)
 replaces the game's ambient occlusion with softer, deeper contact shading in
@@ -40,7 +40,7 @@ from High up.
 
 **Contact shadows** (Off, Low, Medium or High) adds small, sharp sun shadows
 under parts, between blocks and where things touch the ground. Presets use it
-from Medium up.
+from Balanced up.
 
 **Bounce light** (Off, Low, Medium or High) lets lit surfaces tint nearby ones
 with their colour. Only what is on screen can bounce. Presets use it from High
@@ -62,7 +62,7 @@ Far and Cinematic uses Very far.
 **Cloud layer** (Off, Few, Some or Many) adds high drifting clouds above the
 game's own. Both follow the time of day: the sun and clouds turn orange at
 sunrise and sunset, and the clouds are moonlit at night. Presets use the sun
-from Low up and clouds from Medium up.
+from Low up and clouds from Balanced up.
 
 **Night sky** (Off, Subtle, Normal or Bright) adds stars, a milky way and a
 moon at night, and **Moonlight** (Off, Low, Medium or High) adds soft blue
@@ -88,9 +88,9 @@ setting. These levels change native intensity inputs; they are not separate
 shadow-map or SSAO sampling-quality modes. Shadows, ambient occlusion and fog
 blur retain the game's actual on/off capability.
 
-Presets are **Off / Performance / Low / Medium / High / Ultra / Cinematic /
-Natural / Vibrant / Moody / Custom**. Choosing a preset stages a group of
-settings. Off bypasses overrides and restores the game's own values. Medium is
+Presets are **Off / Performance / Low / Balanced / High / Ultra / Cinematic /
+Natural / Vibrant / Moody / Clear Day / Custom**. Choosing a preset stages a group of
+settings. Off bypasses overrides and restores the game's own values. Balanced is
 the initial preset.
 
 Every preset except Custom shows only a few common settings: Antialiasing,
@@ -116,13 +116,14 @@ washes out the whole scene. More fog is available in Custom.
 | Off | Game settings; no native overrides | Game setting |
 | Performance | SSAO, shadows, fog blur, bloom, base fog, clouds and grass off | FXAA |
 | Low | Shadows on, low bloom/base fog; SSAO, fog blur and grass off | SMAA Medium |
-| Medium | Native effects on; medium bloom/base fog | SMAA High |
+| Balanced | Native effects on; medium bloom/base fog, contact shadows Low | TAA High |
 | High | Native effects on; high bloom, medium base fog | TAA High, sharpening Low |
 | Ultra | Native effects on; ultra bloom, medium base fog, Vivid look | TAA + jitter Ultra, sharpening Low |
-| Cinematic | As Ultra, with stronger beams, local lights, depth of field and motion blur | TAA + jitter Ultra, sharpening Medium |
+| Cinematic | As Ultra, with a teal & orange film grade, stronger beams, local lights, depth of field and motion blur | TAA + jitter Ultra, sharpening Medium |
 | Natural | High, with Clean tone mapping, no colour look or vignette, softer bloom and glare, no volumetric fog | TAA High, sharpening Low |
 | Vibrant | Ultra, with a strong Vivid look, many clouds, a bright sun and stars, strong clear sun beams and low base fog | TAA + jitter Ultra, sharpening Low |
-| Moody | High, with the Moody look, a medium vignette, strong sun beams, light haze and many clouds | TAA High, sharpening Low |
+| Moody | High, with a strong warm golden-hour grade, a medium vignette, strong sun beams, light haze and many clouds | TAA High, sharpening Low |
+| Clear Day | High, with Clean tone mapping, no colour look or vignette, low base fog, no volumetric fog, short clear beams | TAA High, sharpening Medium |
 | Custom | Every setting shown, starting from the last preset | As set |
 
 High and Ultra do not claim greater texture resolution or sample counts.
