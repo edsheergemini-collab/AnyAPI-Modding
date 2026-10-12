@@ -29,6 +29,10 @@ Texture2D<float> shadow8 : register(t12);
 Texture2D<float> shadow9 : register(t13);
 Texture2D<float> shadow10 : register(t14);
 Texture2D<float> shadow11 : register(t15);
+// Temporal history, ping-ponged at half resolution. Row 21 of the matrix
+// texture says which one was written this frame.
+Texture2D<float4> history_a : register(t16);
+Texture2D<float4> history_b : register(t17);
 SamplerState linear_sampler : register(s0);
 SamplerState point_sampler : register(s1);
 // Drawn once per cascade. Matrix rows travel in immutable command-list constants.
@@ -51,6 +55,16 @@ float shadow_sample(uint cascade,float2 uv) {
     default:return shadow11.SampleLevel(point_sampler,uv,0);
     }
 }
+
+// Matrix texture rows 20-21 carry per-frame data that no longer fits in the
+// 56 root constants. All zero means the original 0.29 behaviour.
+// Row 20: previous camera position (relative to this frame's origin) and
+// history validity, previous right/up axes with half-FOV tangents, previous
+// forward axis and the frame index.
+// Row 21: clarity, beam reach (m, 0 = unlimited), sun-height response,
+// temporal on; then history read selector and history weight.
+float4 shaping(){return matrices.Load(int3(0,21,0));}
+float4 temporal_controls(){return matrices.Load(int3(1,21,0));}
 
 struct Varying { float4 position : SV_Position; float2 uv : TEXCOORD0; };
 Varying Vertex(uint id : SV_VertexID) {
@@ -95,13 +109,16 @@ float3 local_illumination(float3 position,float3 ray) {
     float3 result=0;
     [loop]for(uint i=0;i<(uint)fog_colour.w;++i){
         float4 location=matrices.Load(int3(0,12+i,0));
+        // Beams reach 40% past the light's own range so they fade out softly
+        // instead of ending where the lit surface does.
+        float reach=location.w*1.4;
         float3 delta=location.xyz-position;float distance=length(delta);
-        if(distance>=location.w)continue;
+        if(distance>=reach)continue;
         float3 toward_light=delta/max(distance,.001);
         float4 direction=matrices.Load(int3(1,12+i,0));
         float4 colour=matrices.Load(int3(2,12+i,0));
         float4 properties=matrices.Load(int3(3,12+i,0));
-        float attenuation=pow(saturate(1-distance/location.w),2);
+        float attenuation=pow(saturate(1-distance/reach),2);
         if(colour.w>.5)attenuation*=smoothstep(direction.w,min(.9999,direction.w+.08),dot(direction.xyz,-toward_light));
         if(attenuation<=.00001)continue;
         float visible=1;
@@ -111,45 +128,107 @@ float3 local_illumination(float3 position,float3 ray) {
             if(any(uv<0)||any(uv>1)||p.z<0||p.z>1)continue;
             float stored=shadow_sample(cascade,uv);visible=properties.y>1.5?(p.z>=stored-.00002?1:0):(p.z<=stored+.00002?1:0);
         }
-        float g=medium.w,mu=dot(ray,toward_light);float phase=(1-g*g)/pow(max(1+g*g-2*g*mu,.001),1.5);
+        // Looking straight into a lamp, a strong forward peak (up to ~19x with
+        // Focused) whited out the screen. Lights use a gentler lobe, capped.
+        float g=min(medium.w,.5),mu=dot(ray,toward_light);float phase=min((1-g*g)/pow(max(1+g*g-2*g*mu,.001),1.5),3);
         result+=colour.rgb*attenuation*visible*phase*sun_colour.w;
     }
     return result;
 }
+float scene_distance(float2 uv,float3 ray) {
+    float distance=view_distance(scene_depth.SampleLevel(point_sampler,uv,0));
+    return min(distance/max(abs(dot(ray,normalize(forward_axis.xyz))),.05),controls.y);
+}
 float4 Integrate(Varying v) : SV_Target {
     float3 ray=view_ray(v.uv);
-    float distance=view_distance(scene_depth.SampleLevel(point_sampler,v.uv,0));
-    distance=min(distance/max(abs(dot(ray,normalize(forward_axis.xyz))),.05),controls.y);
+    float distance=scene_distance(v.uv,ray);
     uint count=(uint)clamp(controls.x,8,64);
+    float4 shape=shaping();
     float g=clamp(medium.w,-.8,.8);float mu=dot(ray,normalize(sunlight.xyz));
     // Native sun_colour is the renderer's artistic direct-light value, not
     // radiometric intensity per steradian. Use an isotropic-relative phase
     // (g=0 -> 1) so shaft strength shares the native lighting scale. The old
     // 1/(4*pi) factor suppressed already small game sun values by 12.57x.
     float phase=(1-g*g)/pow(max(1+g*g-2*g*mu,.001),1.5);
+    // Clarity mode caps the forward peak: Strong focus reached ~19x looking
+    // into the sun, which turned the whole view white.
+    if(shape.x>0)phase=min(phase,4);
+    // Interleaved gradient noise, rotated each frame, moves the sample
+    // positions so temporal blending removes banding instead of freezing it.
+    bool temporal=shape.w>.5;
+    float jitter=temporal?frac(52.9829189*frac(dot(v.position.xy,float2(.06711056,.00583715)))+matrices.Load(int3(3,20,0)).w*.61803399):.5;
     // Fog owns extinction and ambient haze. Beams use a fixed, clear-air
     // scattering medium so their brightness does not depend on the fog tier.
-    float transmittance=1,beam_transmittance=1,local_transmittance=1;float3 scattered=0;
+    float transmittance=1,beam_transmittance=1,local_transmittance=1;float3 scattered=0,lamps=0;
+    float beam_lit=0,beam_total=0;
     [loop]for(uint i=0;i<count;++i) {
         // Quadratic spacing resolves nearby branch shadows without more samples.
         float a=float(i)/count,b=float(i+1)/count;
         float begin=distance*a*a,end=distance*b*b;
-        float step=end-begin,d=(begin+end)*.5;float3 position=camera.xyz+ray*d;
+        float step=end-begin,d=temporal?distance*pow((i+jitter)/count,2):(begin+end)*.5;float3 position=camera.xyz+ray*d;
         float world_height=camera.w+ray.y*d;
         float density=medium.x*exp(-max(world_height-medium.y,0)*medium.z);
         float segment=exp(-density*controls.w*step);
         float fog_weight=transmittance*(1-segment);
         float beam_segment=exp(-.002*step);
         float beam_weight=transmittance*beam_transmittance*(1-beam_segment);
-        float local_segment=exp(-.02*step);
+        // Beam reach fades distant clear air, which otherwise piles up into
+        // a uniform veil over everything far away.
+        if(shape.y>0)beam_weight*=exp(-d/shape.y);
+        // Clear air for lamp beams: denser air turned every lamp into a glowing fog ball.
+        float local_segment=exp(-.006*step);
         float local_weight=transmittance*local_transmittance*(1-local_segment);
-        scattered+=fog_colour.rgb*fog_weight
-            +sun_colour.rgb*controls.z*phase*visibility(position)*beam_weight
-            +local_illumination(position,ray)*local_weight;
+        float lit=visibility(position);
+        beam_lit+=lit*beam_weight;beam_total+=beam_weight;
+        // V3 lights the fog itself: shadowed air (under a canopy, behind a
+        // hill) is darker and sunlit air brighter, at the same average level.
+        // A flat fog colour read as an evenly milky wall.
+        float fog_light=shape.x>0?lerp(.45,1.35,lit):1;
+        scattered+=fog_colour.rgb*fog_weight*fog_light;lamps+=local_illumination(position,ray)*local_weight;
         transmittance*=segment;beam_transmittance*=beam_segment;local_transmittance*=local_segment;
         if(transmittance<.001)break;
     }
+    // Clarity keeps beams where the ray crosses shadow edges (gaps in trees,
+    // windows, terrain) and thins the glow of rays that are lit end to end,
+    // which is what read as fog. 0 keeps the original uniform scattering.
+    // Lamp glow rolls off softly instead of blowing out, and fades in daylight
+    // the way real headlight beams do (the sun washes them out).
+    float lamp_level=dot(lamps,float3(.2126,.7152,.0722));lamps/=1+lamp_level/.35;
+    lamps*=1-.75*smoothstep(.02,.2,dot(sun_colour.rgb,float3(.2126,.7152,.0722)));
+    scattered+=lamps;
+    float shadowed=1-beam_lit/max(beam_total,.000001);
+    float beams=beam_lit*lerp(1-saturate(shape.x),1,smoothstep(.02,.3,shadowed));
+    // Sun-height response: full beams at sunrise and sunset, a third at noon,
+    // none below the horizon, and a warm tint while the sun is low.
+    float3 sun=sun_colour.rgb;
+    if(shape.z>.5){float elevation=normalize(sunlight.xyz).y;sun*=lerp(1,.35,smoothstep(.35,.9,elevation))*smoothstep(-.04,.06,elevation)*lerp(float3(1,.78,.55),float3(1,1,1),smoothstep(.06,.45,elevation));}
+    scattered+=sun*controls.z*phase*beams;
     return float4(scattered,transmittance);
+}
+// Blends this frame's noisy half-resolution result with reprojected history.
+// The camera reprojection uses scene depth; the 3x3 neighbourhood clamp
+// rejects history that no longer matches (moving objects, disocclusion).
+float4 Accumulate(Varying v) : SV_Target {
+    float4 current=volume.SampleLevel(point_sampler,v.uv,0);
+    float4 previous_camera=matrices.Load(int3(0,20,0)),control=temporal_controls();
+    if(previous_camera.w<.5)return current;
+    float4 previous_right=matrices.Load(int3(1,20,0)),previous_up=matrices.Load(int3(2,20,0)),previous_forward=matrices.Load(int3(3,20,0));
+    float3 ray=view_ray(v.uv);float3 relative=camera.xyz+ray*scene_distance(v.uv,ray)-previous_camera.xyz;
+    float z=dot(relative,previous_forward.xyz);if(z<=.01)return current;
+    float2 uv=float2(dot(relative,previous_right.xyz)/(z*previous_right.w),dot(relative,previous_up.xyz)/(z*previous_up.w))*float2(.5,-.5)+.5;
+    if(any(uv<0)||any(uv>1))return current;
+    float4 history=control.x>.5?history_b.SampleLevel(linear_sampler,uv,0):history_a.SampleLevel(linear_sampler,uv,0);
+    // Only neighbours at a similar depth bound the history: at a silhouette the
+    // sky's dense fog must not widen the box for the object in front of it.
+    uint w,h;volume.GetDimensions(w,h);float2 texel=1/float2(w,h);float4 low=current,high=current;
+    float centre=view_distance(scene_depth.SampleLevel(point_sampler,v.uv,0)),tolerance=max(.5,centre*.05);
+    [unroll]for(int y=-1;y<=1;++y)[unroll]for(int x=-1;x<=1;++x){float2 uv_n=v.uv+float2(x,y)*texel;if(abs(view_distance(scene_depth.SampleLevel(point_sampler,uv_n,0))-centre)>tolerance)continue;float4 s=volume.SampleLevel(point_sampler,uv_n,0);low=min(low,s);high=max(high,s);}
+    return lerp(current,clamp(history,low,high),saturate(control.y));
+}
+float4 resolved_lighting(float2 uv) {
+    if(shaping().w<.5)return volume.SampleLevel(point_sampler,uv,0);
+    // The selector names the history that was read, so the other one holds this frame.
+    return temporal_controls().x>.5?history_a.SampleLevel(point_sampler,uv,0):history_b.SampleLevel(point_sampler,uv,0);
 }
 float4 Composite(Varying v) : SV_Target {
     uint w,h;volume.GetDimensions(w,h);float2 pixel=v.uv*float2(w,h)-.5;
@@ -161,9 +240,16 @@ float4 Composite(Varying v) : SV_Target {
         float neighbour=view_distance(scene_depth.SampleLevel(point_sampler,uv,0));
         float bilinear=(x?fraction.x:1-fraction.x)*(y?fraction.y:1-fraction.y);
         float weight=bilinear*exp(-abs(center_distance-neighbour)/max(.1,center_distance*.02));
-        accumulated+=volume.SampleLevel(point_sampler,uv,0)*weight;total+=weight;
+        accumulated+=resolved_lighting(uv)*weight;total+=weight;
     }
-    float4 lighting=total>.00001?accumulated/total:volume.SampleLevel(point_sampler,v.uv,0);
+    float4 lighting=accumulated/max(total,.00001);
+    // No half-resolution neighbour matches this pixel's depth (a thin branch or a
+    // silhouette against the sky): take the nearest-depth texel from a wider
+    // window instead of the sky's fog, which would leave a bright outline.
+    if(total<.1){float best=1e30;
+        [unroll]for(int y=-1;y<3;++y)[unroll]for(int x=-1;x<3;++x){float2 uv=(base+float2(x,y)+.5)/float2(w,h);
+            float difference=abs(view_distance(scene_depth.SampleLevel(point_sampler,uv,0))-center_distance);
+            if(difference<best){best=difference;lighting=resolved_lighting(uv);}}}
     float4 original=scene_colour.SampleLevel(linear_sampler,v.uv,0);
     return float4(original.rgb*lighting.a+lighting.rgb,original.a);
 }

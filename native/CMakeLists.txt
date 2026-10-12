@@ -173,11 +173,11 @@ function(anyapi_version_resource target product)
     set(ANYAPI_BINARY_NAME "dinput8.dll")
   endif()
   if(target STREQUAL "dinput8")
-    set(ANYAPI_VERSION_COMMA "0,35,2,0")
-    set(ANYAPI_VERSION_TEXT "0.35.2")
+    set(ANYAPI_VERSION_COMMA "0,36,0,0")
+    set(ANYAPI_VERSION_TEXT "0.36.0")
   elseif(target STREQUAL "AnyGraphics")
-    set(ANYAPI_VERSION_COMMA "0,29,3,0")
-    set(ANYAPI_VERSION_TEXT "0.29.3")
+    set(ANYAPI_VERSION_COMMA "0,30,0,0")
+    set(ANYAPI_VERSION_TEXT "0.30.0")
   elseif(target STREQUAL "AnyMapMod")
     set(ANYAPI_VERSION_COMMA "0,27,2,0")
     set(ANYAPI_VERSION_TEXT "0.27.2")
@@ -258,6 +258,108 @@ target_include_directories(lighting_gpu_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR
 target_compile_options(lighting_gpu_test PRIVATE /UNDEBUG /EHsc /utf-8)
 target_link_libraries(lighting_gpu_test PRIVATE d3d12 dxgi d3dcompiler)
 add_test(NAME lighting_gpu COMMAND lighting_gpu_test)
+# Scene effects: tone mapping, looks, eye adaptation and bloom before the game's tone mapping.
+add_executable(effects_shader_test effects_shader_test.cpp)
+target_compile_options(effects_shader_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(effects_shader_test PRIVATE d3dcompiler)
+add_test(NAME effects_kernels COMMAND effects_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/effects.hlsl")
+set(EFFECTS_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/effects-generated/effects_bytecode.h")
+add_custom_command(OUTPUT "${EFFECTS_GENERATED}"
+ COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/effects-generated"
+ COMMAND effects_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/effects.hlsl" "${EFFECTS_GENERATED}"
+ DEPENDS effects_shader_test effects/effects.hlsl VERBATIM)
+add_custom_target(effects_bytecode DEPENDS "${EFFECTS_GENERATED}")
+add_executable(effects_gpu_test effects_gpu_test.cpp)
+add_dependencies(effects_gpu_test effects_bytecode)
+target_include_directories(effects_gpu_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/effects-generated")
+target_compile_options(effects_gpu_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(effects_gpu_test PRIVATE d3d12 dxgi d3dcompiler)
+add_test(NAME effects_gpu COMMAND effects_gpu_test)
+# Ambient occlusion written into the game's SSAO target before the composite reads it.
+add_executable(ao_shader_test ao_shader_test.cpp)
+target_compile_options(ao_shader_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(ao_shader_test PRIVATE d3dcompiler)
+add_test(NAME ao_kernels COMMAND ao_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/ao.hlsl")
+set(AO_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/effects-generated/ao_bytecode.h")
+add_custom_command(OUTPUT "${AO_GENERATED}"
+ COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/effects-generated"
+ COMMAND ao_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/ao.hlsl" "${AO_GENERATED}"
+ DEPENDS ao_shader_test effects/ao.hlsl VERBATIM)
+add_custom_target(ao_bytecode DEPENDS "${AO_GENERATED}")
+add_executable(ao_gpu_test ao_gpu_test.cpp)
+add_dependencies(ao_gpu_test ao_bytecode)
+target_include_directories(ao_gpu_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/effects-generated")
+target_compile_options(ao_gpu_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(ao_gpu_test PRIVATE d3d12 dxgi)
+add_test(NAME ao_gpu COMMAND ao_gpu_test)
+# Night sky: stars, moon and moonlight on the game's day/night clock.
+add_executable(sky_shader_test sky_shader_test.cpp)
+target_compile_options(sky_shader_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(sky_shader_test PRIVATE d3dcompiler)
+add_test(NAME sky_kernels COMMAND sky_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/sky.hlsl")
+set(SKY_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/effects-generated/sky_bytecode.h")
+add_custom_command(OUTPUT "${SKY_GENERATED}"
+ COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/effects-generated"
+ COMMAND sky_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/sky.hlsl" "${SKY_GENERATED}"
+ DEPENDS sky_shader_test effects/sky.hlsl effects/sky_frame.h VERBATIM)
+add_custom_target(sky_bytecode DEPENDS "${SKY_GENERATED}")
+add_executable(sky_gpu_test sky_gpu_test.cpp)
+add_dependencies(sky_gpu_test sky_bytecode)
+target_include_directories(sky_gpu_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/effects-generated")
+target_compile_options(sky_gpu_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(sky_gpu_test PRIVATE d3d12 dxgi)
+add_test(NAME sky_gpu COMMAND sky_gpu_test)
+# Contact shadows: short screen-space sun shadows before volumetric lighting.
+add_executable(contact_shader_test contact_shader_test.cpp)
+target_compile_options(contact_shader_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(contact_shader_test PRIVATE d3dcompiler)
+add_test(NAME contact_kernels COMMAND contact_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/contact.hlsl")
+set(CONTACT_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/effects-generated/contact_bytecode.h")
+add_custom_command(OUTPUT "${CONTACT_GENERATED}"
+ COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/effects-generated"
+ COMMAND contact_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/contact.hlsl" "${CONTACT_GENERATED}"
+ DEPENDS contact_shader_test effects/contact.hlsl effects/contact_frame.h VERBATIM)
+add_custom_target(contact_bytecode DEPENDS "${CONTACT_GENERATED}")
+add_executable(contact_gpu_test contact_gpu_test.cpp)
+add_dependencies(contact_gpu_test contact_bytecode)
+target_include_directories(contact_gpu_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/effects-generated")
+target_compile_options(contact_gpu_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(contact_gpu_test PRIVATE d3d12 dxgi)
+add_test(NAME contact_gpu COMMAND contact_gpu_test)
+# Bounce light: one bounce of screen-space indirect light before volumetric lighting.
+add_executable(gi_shader_test gi_shader_test.cpp)
+target_compile_options(gi_shader_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(gi_shader_test PRIVATE d3dcompiler)
+add_test(NAME gi_kernels COMMAND gi_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/gi.hlsl")
+set(GI_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/effects-generated/gi_bytecode.h")
+add_custom_command(OUTPUT "${GI_GENERATED}"
+ COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/effects-generated"
+ COMMAND gi_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/gi.hlsl" "${GI_GENERATED}"
+ DEPENDS gi_shader_test effects/gi.hlsl effects/gi_frame.h VERBATIM)
+add_custom_target(gi_bytecode DEPENDS "${GI_GENERATED}")
+add_executable(gi_gpu_test gi_gpu_test.cpp)
+add_dependencies(gi_gpu_test gi_bytecode)
+target_include_directories(gi_gpu_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/effects-generated")
+target_compile_options(gi_gpu_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(gi_gpu_test PRIVATE d3d12 dxgi)
+add_test(NAME gi_gpu COMMAND gi_gpu_test)
+# Lens: depth of field and camera motion blur before the finishing pass.
+add_executable(lens_shader_test lens_shader_test.cpp)
+target_compile_options(lens_shader_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(lens_shader_test PRIVATE d3dcompiler)
+add_test(NAME lens_kernels COMMAND lens_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/lens.hlsl")
+set(LENS_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/effects-generated/lens_bytecode.h")
+add_custom_command(OUTPUT "${LENS_GENERATED}"
+ COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/effects-generated"
+ COMMAND lens_shader_test "${CMAKE_CURRENT_SOURCE_DIR}/effects/lens.hlsl" "${LENS_GENERATED}"
+ DEPENDS lens_shader_test effects/lens.hlsl effects/lens_frame.h VERBATIM)
+add_custom_target(lens_bytecode DEPENDS "${LENS_GENERATED}")
+add_executable(lens_gpu_test lens_gpu_test.cpp)
+add_dependencies(lens_gpu_test lens_bytecode)
+target_include_directories(lens_gpu_test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/effects-generated")
+target_compile_options(lens_gpu_test PRIVATE /UNDEBUG /EHsc /utf-8)
+target_link_libraries(lens_gpu_test PRIVATE d3d12 dxgi)
+add_test(NAME lens_gpu COMMAND lens_gpu_test)
 add_executable(hud_hints_test hud_hints_test.cpp)
 target_compile_options(hud_hints_test PRIVATE /UNDEBUG /EHsc /utf-8 /D_CRT_SECURE_NO_WARNINGS)
 target_link_libraries(hud_hints_test PRIVATE bcrypt d3d12 d3d11 dxgi d2d1 dwrite d3dcompiler)
@@ -271,6 +373,8 @@ endforeach()
 foreach(target dinput8 inventory_native_test menu_extensions_test players_producer_test settings_tabs_test settings_widgets_test storage_native_test hud_hints_test)
  add_dependencies(${target} lighting_bytecode)
  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/lighting-generated")
+ add_dependencies(${target} effects_bytecode ao_bytecode sky_bytecode contact_bytecode gi_bytecode lens_bytecode)
+ target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/effects-generated")
 endforeach()
 
 add_executable(scene_lighting_test tests/scene_lighting_test.cpp)
