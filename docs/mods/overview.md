@@ -25,11 +25,12 @@ Anymaker 0.1.23 keeps AnyAPI 0.34.1.
 
 ## Prototypes
 
-Built from source only, not in the catalog yet. It uses the experimental SDK.
+Built from source only, not in the catalog yet. They use the experimental SDK.
 
 | Mod | Features | Optional integration |
 | --- | --- | --- |
 | [AnyLights](lights.md) | Light colours and flash patterns in the Properties Tool, with data port and microcontroller channels | AnyHelpers settings |
+| [ThirdPerson](third-person.md) | Third-person camera on F5 with an adjustable follow distance (Alt + mouse wheel) | AnyHelpers settings and controls |
 
 See [validation status](../development/validation.md) for tested behavior and limits,
 including what has and has not been checked in multiplayer.
