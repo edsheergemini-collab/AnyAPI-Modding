@@ -25,5 +25,18 @@ int main(){
  Plane at{0,3};Box w=wall(at,lo,hi,0.25,2,0.02);
  assert(std::fabs(w.min[0]-(0.375-0.01))<1e-12&&std::fabs(w.max[0]-(0.375+0.01))<1e-12);
  assert(std::fabs(w.min[1]-(-0.5))<1e-12&&std::fabs(w.max[1]-2.0)<1e-12&&std::fabs(w.min[2]-0.0)<1e-12&&std::fabs(w.max[2]-2.5)<1e-12);
+ // Full strength draws the solid slab; lower strength draws grid-aligned bars on both in-plane axes.
+ Box bars[kLatticeMax];assert(wall_lattice(w,0,0.25,1.0,bars)==1&&bars[0].min[1]==w.min[1]&&bars[0].max[2]==w.max[2]);
+ int n=wall_lattice(w,0,0.25,0.35,bars);assert(n==(10+1)+(10+1));
+ for(int i=0;i<n;++i){assert(bars[i].min[0]==w.min[0]&&bars[i].max[0]==w.max[0]);
+  for(int k=1;k<=2;++k)assert(bars[i].min[k]>=w.min[k]-1e-12&&bars[i].max[k]<=w.max[k]+1e-12&&bars[i].min[k]<=bars[i].max[k]);}
+ // Bar width follows strength: 35% over a 0.25 m pitch is 0.25*(1-sqrt(0.65)) wide.
+ assert(std::fabs((bars[1].max[1]-bars[1].min[1])-0.25*(1-std::sqrt(0.65)))<1e-12);
+ Box thin[kLatticeMax],thick[kLatticeMax];wall_lattice(w,0,0.25,0.1,thin);wall_lattice(w,0,0.25,0.8,thick);
+ assert(thin[1].max[1]-thin[1].min[1]<thick[1].max[1]-thick[1].min[1]);
+ // Strength below 5% is clamped, and a huge wall never exceeds the bar budget.
+ wall_lattice(w,0,0.25,0.0,thin);assert(std::fabs((thin[1].max[1]-thin[1].min[1])-0.25*(1-std::sqrt(0.95)))<1e-12);
+ Box big=wall(Plane{1,0},Grid{{-5000,0,-3}},Grid{{5000,0,3}},0.25,2,0.02);
+ assert(wall_lattice(big,1,0.25,0.5,bars)<=kLatticeMax);
  return 0;
 }

@@ -146,8 +146,10 @@ void draw_wall(uint8_t* overlay, const uint8_t* vehicle, const VehicleState& v, 
     double grid = g_grid_size;
     Box box = wall(v.plane, v.lo, v.hi, grid, 2, grid * 0.08);
     int32_t palette = kPaletteChoices[std::clamp(palette_choice, 0, 3)];
-    double value = std::clamp(opacity / 100.0, 0.05, 1.0);
-    reinterpret_cast<box_t>(g_box_fn)(overlay, box.min, box.max, transform, identity, &palette, &value);
+    double value = 0;   // shade on gradient palettes only; the solid colours ignore it
+    Box bars[kLatticeMax];
+    int count = wall_lattice(box, v.plane.axis, grid, opacity / 100.0, bars);
+    for (int i = 0; i < count; ++i) reinterpret_cast<box_t>(g_box_fn)(overlay, bars[i].min, bars[i].max, transform, identity, &palette, &value);
     // Outline and a centre cross so the plane reads clearly edge-on.
     int a = v.plane.axis, b = (a + 1) % 3, c = (a + 2) % 3;
     double mid = (box.min[a] + box.max[a]) * 0.5, radius = grid * 0.06;
