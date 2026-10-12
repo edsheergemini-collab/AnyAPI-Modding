@@ -50,7 +50,7 @@ up.
 effects. Depth of field focuses on whatever is in the middle of the screen and
 blurs what is nearer or farther. Motion blur blurs the world as the camera
 turns and moves; hands, held items and nearby cockpit parts stay sharp. Only
-the Cinematic preset turns them on (Low). With depth of field on, **Blur
+the Cinematic preset turns them on (depth of field Medium, motion blur Low). With depth of field on, **Blur
 strength** (0.25 to 3, default 1) sets how strongly it blurs.
 
 **Object draw distance** (Game setting, Far 1.5x, Very far 2x or Extreme 3x)
@@ -117,9 +117,9 @@ washes out the whole scene. More fog is available in Custom.
 | Performance | SSAO, shadows, fog blur, bloom, base fog, clouds and grass off | FXAA |
 | Low | Shadows on, low bloom/base fog; SSAO, fog blur and grass off | SMAA Medium |
 | Balanced | Native effects on; medium bloom/base fog, contact shadows Low | TAA High |
-| High | Native effects on; high bloom, medium base fog; subtle Vivid look, Medium bounce light, Medium contact shadows, strong local beams | TAA High, sharpening Low |
-| Ultra | As High with a Vivid look, strong bloom and glare, High bounce light and contact shadows, bright sun, many clouds, very far objects and clear sun beams | TAA + jitter Ultra, sharpening Low |
-| Cinematic | As Ultra, with a strong teal & orange film grade, a medium vignette, stronger beams, extreme object distance, depth of field and motion blur | TAA + jitter Ultra, sharpening Medium |
+| High | Native effects on; high bloom, medium base fog; subtle Vivid look, Medium detailed shading, bounce light and contact shadows, strong local beams | TAA High, sharpening Low |
+| Ultra | As High with a Vivid look, strong bloom and glare, High detailed shading, bounce light and contact shadows, bright sun, many clouds, very far objects and clear sun beams | TAA + jitter Ultra, sharpening Low |
+| Cinematic | As Ultra, with a strong teal & orange film grade, a medium vignette, stronger beams, extreme object distance, stronger sun beams, Medium depth of field and Low motion blur | TAA + jitter Ultra, sharpening Medium |
 | Natural | High, with Clean tone mapping, no colour look or vignette, softer bloom and glare, no volumetric fog | TAA High, sharpening Low |
 | Vibrant | Ultra, with a strong Vivid look, many clouds, a bright sun and stars, strong clear sun beams and low base fog | TAA + jitter Ultra, sharpening Low |
 | Moody | High, with a strong warm golden-hour grade, a medium vignette, strong sun beams, light haze and many clouds | TAA High, sharpening Low |
