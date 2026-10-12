@@ -30,26 +30,25 @@ float4 Weights(Varying v) : SV_Target {
     float2 pixel;float4 offset[3];SMAABlendingWeightCalculationVS(v.uv,pixel,offset);
     return SMAABlendingWeightCalculationPS(v.uv,pixel,offset,source_image,area_or_weights,search_image,float4(0,0,0,0));
 }
-// The game draws its clouds and distant grass with a fixed 2x2 screen-door
-// dither for transparency. It never moves, so TAA cannot average it away and
-// sharpening makes it worse. Where a pixel and its diagonals sit on one level
-// and its four sides on another, both evenly, it is that checker: replace it
-// with the checker's average. Real edges, lines and single bright specks
-// fail the evenness tests and are left alone.
+// The game draws its clouds and distant grass with a fixed 4x4 ordered
+// (Bayer) screen-door dither for transparency. It never moves, so TAA cannot
+// average it away and sharpening makes it worse. Any 4x4-periodic pattern has
+// the same 4x4 box average wherever the box sits, while real edges and
+// texture do not: where the pixels vary a lot but the box averages two pixels
+// either side agree, replace the pixel with the box average.
+float3 box4(float2 origin){float2 p=render_metrics.xy;float3 sum=0;
+    [unroll]for(int y=0;y<2;++y)[unroll]for(int x=0;x<2;++x)sum+=source_image.SampleLevel(LinearSampler,(origin+float2(1+2*x,1+2*y))*p,0).rgb;
+    return sum*.25;}
 float3 undither(float2 uv,float3 c){
-    float2 p=render_metrics.xy;float3 luma=float3(.299,.587,.114);
-    float3 n=source_image.SampleLevel(PointSampler,uv-float2(0,p.y),0).rgb,s=source_image.SampleLevel(PointSampler,uv+float2(0,p.y),0).rgb;
-    float3 w=source_image.SampleLevel(PointSampler,uv-float2(p.x,0),0).rgb,e=source_image.SampleLevel(PointSampler,uv+float2(p.x,0),0).rgb;
-    float3 a=source_image.SampleLevel(PointSampler,uv+float2(-p.x,-p.y),0).rgb,b=source_image.SampleLevel(PointSampler,uv+float2(p.x,-p.y),0).rgb;
-    float3 g=source_image.SampleLevel(PointSampler,uv+float2(-p.x,p.y),0).rgb,h=source_image.SampleLevel(PointSampler,uv+float2(p.x,p.y),0).rgb;
-    float4 sides=float4(dot(n,luma),dot(s,luma),dot(w,luma),dot(e,luma)),corners=float4(dot(a,luma),dot(b,luma),dot(g,luma),dot(h,luma));
-    float C=dot(c,luma),S=dot(sides,.25),D=dot(corners,.25);
-    float across=C-S,diagonal=D-S;
-    float agree=across*diagonal>0?min(abs(across),abs(diagonal))/max(max(abs(across),abs(diagonal)),.0001):0;
-    float spread=(max(max(sides.x,sides.y),max(sides.z,sides.w))-min(min(sides.x,sides.y),min(sides.z,sides.w)))+(max(max(corners.x,corners.y),max(corners.z,corners.w))-min(min(corners.x,corners.y),min(corners.z,corners.w)));
-    float k=agree*saturate(1-spread/max(abs(across),.0001))*saturate((abs(across)-.008)*60);
-    float3 average=((c+(a+b+g+h)*.25)*.5+(n+s+w+e)*.25)*.5;
-    return lerp(c,average,k);
+    float2 p=render_metrics.xy,pixel=floor(uv/p);float3 luma=float3(.299,.587,.114);
+    float3 mean=0;float m1=0,m2=0;
+    [unroll]for(int y=-2;y<2;++y)[unroll]for(int x=-2;x<2;++x){float3 t=source_image.SampleLevel(PointSampler,(pixel+float2(x,y)+.5)*p,0).rgb;mean+=t;float l=dot(t,luma);m1+=l;m2+=l*l;}
+    mean/=16;m1/=16;float sigma=sqrt(max(m2/16-m1*m1,0));
+    float centre=dot(mean,luma),spread=0;
+    spread=max(spread,abs(dot(box4(pixel+float2(-4,-2)),luma)-centre));spread=max(spread,abs(dot(box4(pixel+float2(0,-2)),luma)-centre));
+    spread=max(spread,abs(dot(box4(pixel+float2(-2,-4)),luma)-centre));spread=max(spread,abs(dot(box4(pixel+float2(-2,0)),luma)-centre));
+    float k=saturate((sigma-.012)*40)*saturate((1-spread/(.2*sigma+.0001))*2);
+    return lerp(c,mean,k);
 }
 float4 Resolve(Varying v) : SV_Target {
     float4 offset;SMAANeighborhoodBlendingVS(v.uv,offset);
