@@ -297,6 +297,27 @@
           "GclSha256": "da170da347d494cf78b8ca43592e1981c5950528d27d0564b81ce8144f30622d"
         }
       ]
+    },
+    {
+      "Id": "thirdperson",
+      "Name": "ThirdPerson",
+      "Version": "0.1.0",
+      "Revision": 1,
+      "MinimumApi": 36,
+      "Description": "Third-person camera: F5 switches between first and third person, Alt + mouse wheel sets the follow distance (1-20 m), with a follow-distance setting. Uses the experimental SDK; Anymaker 0.1.24 only.",
+      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/mods-2026.10.12/ThirdPerson-0.1.0.zip",
+      "Sha256": "61bd1b5561a8857d463e4727ef9e4db6da3b500fd9ea044722e2eeddd869c854",
+      "FileHashes": {
+        "AnyAPI and Modding/mods/ThirdPerson.dll": "92001770800706f86f772aad2f97d6e55ae02d1dd0ab2ff2b18074a0af981c8b"
+      },
+      "GameBuilds": [
+        {
+          "Version": "0.1.24",
+          "SteamBuild": 25826614,
+          "ExeSha256": "2bfa5396ba49cb902941afe65294403c0222e9266e35ce3e7131cb8185d336f7",
+          "GclSha256": "da170da347d494cf78b8ca43592e1981c5950528d27d0564b81ce8144f30622d"
+        }
+      ]
     }
   ]
 }
