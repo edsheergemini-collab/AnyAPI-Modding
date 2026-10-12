@@ -1,10 +1,11 @@
-// AnyMirror (prototype): symmetric building with the edge tools. While either edge tool is equipped and
-// mirroring is on, every edge you place is also placed mirrored across a plane through the build. The plane
+// AnyMirror: symmetric building. While mirroring is on, every edge you place with either edge tool, every plate
+// you add with the add plate tool, and every edge, node or plate you take off with the remove tool is mirrored
+// across a plane through the build (plates need their mirrored edges to exist already). The plane
 // is drawn in the world as a see-through wall that you can show or hide. Keybinds (rebindable in AnyHelpers):
 // J mirror on/off, K show/hide wall, L cycle axis, [ and ] move the plane half a grid step, \ re-centre it.
 //
-// Co-op: the mirrored edge goes to the server through the same request the edge tool sends, so the host
-// validates and replicates it like any edge. Only the player building needs the mod.
+// Co-op: each mirrored piece goes to the server through the same request the tool sends, so the host
+// validates and replicates it like any other. Only the player building needs the mod.
 //
 // EXPERIMENTAL. Hooks game functions directly through the experimental SDK (anymirror_bindings.h). They
 // resolve only on Anymaker 0.1.24 / Steam build 25826614. First runs are diagnostic: read anymaker_modding.log.
@@ -88,7 +89,7 @@ void refresh_settings() {
     uint64_t next = settings->revision();
     if (next == g_revision) return;
     g_revision = next;
-    const double lo[] = {0, 0, 0, 10}, hi[] = {1, 1, 3, 90};
+    const double lo[] = {0, 0, 0, 10}, hi[] = {1, 1, 3, 100};
     for (int i = 0; i < kSettingCount; ++i) {
         AnySettingValueV1 v;
         if (settings->get(g_tokens[i], &v) && std::isfinite(v.number)) g_values[i] = std::clamp(v.number, lo[i], hi[i]);
@@ -112,11 +113,19 @@ using overlay_t = void (*)(uint8_t* state, void* camera, void* client, uint8_t* 
 using transform_t = void (*)(double* out, const uint8_t* vehicle);
 using box_t = void (*)(uint8_t* overlay, const double* min, const double* max, const double* transform, const double* local, const int32_t* palette, const double* value);
 using line_t = void (*)(uint8_t* overlay, const double* a, const double* b, const double* transform, const double* radius, const int32_t* palette, const double* value);
+using remove_t = void (*)(uint8_t* peer_data, const int32_t* vehicle_id, const int32_t* id);
+using add_plate_t = void (*)(uint8_t* peer_data, const int32_t* vehicle_id, anymaker::gc_vector_raw* node_ids, const bool* is_reverse, const int32_t* type);
+using plate_overlay_t = void (*)(uint8_t* state, void* item, void* camera, void* client, uint8_t* scene, uint8_t* overlay);
 
-anymaker::cell_hook h_push, h_overlay[4];
+// Overlay hooks: 0-3 the two edge tools (hover, drag), 4-8 the remove tool states, 9-10 the add plate tool states.
+constexpr int kEdgeOverlays = 4, kRemoveOverlays = 5, kPlateOverlays = 2, kOverlayCount = kEdgeOverlays + kRemoveOverlays + kPlateOverlays;
+enum Remove { kRemoveEdge, kRemoveNode, kRemovePlate, kRemoveCount };
+const char* const kRemoveNames[] = {"edge", "node", "plate"};
+anymaker::cell_hook h_push, h_overlay[kOverlayCount], h_remove[kRemoveCount], h_add_plate;
 void* g_box_fn; void* g_line_fn; void* g_transform_fn;
 const double* g_grid_size_ptr;
-std::atomic<int> g_edge_logs{12}, g_wall_logs{3};
+uint8_t* g_scene;               // client scene from the last tool overlay frame; used only while a tool is active
+std::atomic<int> g_edge_logs{12}, g_wall_logs{3}, g_remove_logs{12}, g_plate_logs{12};
 
 void hk_push_edge(uint8_t* peer_data, const int32_t* vehicle_id, const Grid* p0, const Grid* p1, const int32_t* size) {
     auto original = reinterpret_cast<push_edge_t>(h_push.original);
@@ -135,6 +144,100 @@ void hk_push_edge(uint8_t* peer_data, const int32_t* vehicle_id, const Grid* p0,
                 send ? "mirror" : "on plane, skipped", m0.v[0], m0.v[1], m0.v[2], m1.v[0], m1.v[1], m1.v[2]);
     }
     if (send) original(peer_data, vehicle_id, &m0, &m1, size);   // straight to the game: never re-enters this hook
+}
+
+// The vehicle and plane removals and plates are mirrored on: null when mirroring is off, no supported tool is
+// in use, or the plane is not placed yet. Call with g_mutex held, on the main thread.
+const uint8_t* mirror_target(int32_t vehicle_id, Plane& plane) {
+    if (!g_enabled || !tool_active(GetTickCount64()) || !g_scene) return nullptr;
+    auto it = g_vehicles.find(vehicle_id);
+    if (it == g_vehicles.end() || !it->second.placed) return nullptr;
+    plane = it->second.plane;
+    return find_vehicle(g_scene, vehicle_id);
+}
+// Id of the node at the mirror image of node `id`, or -1 when there is none.
+int32_t mirrored_node(const uint8_t* vehicle, int32_t id, const Plane& plane) {
+    Vec3i p{};
+    if (!node_pos(vehicle, id, p)) return -1;
+    Grid g{{p.x, p.y, p.z}};
+    if (!in_range(g)) return -1;
+    Grid m = mirror(g, plane);
+    return node_at(vehicle, Vec3i{m.v[0], m.v[1], m.v[2]});
+}
+// Id of the mirror twin of an edge, node or plate, or -1 when the twin is missing or is the same piece.
+int32_t mirrored_piece(int kind, const uint8_t* vehicle, int32_t id, const Plane& plane) {
+    int32_t twin = -1;
+    if (kind == kRemoveNode) twin = mirrored_node(vehicle, id, plane);
+    else if (kind == kRemoveEdge) {
+        int32_t n0 = -1, n1 = -1;
+        for_each_edge(vehicle, [&](int32_t e, int32_t a, int32_t b) { if (e != id) return true; n0 = a; n1 = b; return false; });
+        int32_t m0 = n0 < 0 ? -1 : mirrored_node(vehicle, n0, plane), m1 = n1 < 0 ? -1 : mirrored_node(vehicle, n1, plane);
+        if (m0 >= 0 && m1 >= 0)
+            for_each_edge(vehicle, [&](int32_t e, int32_t a, int32_t b) { if ((a == m0 && b == m1) || (a == m1 && b == m0)) { twin = e; return false; } return true; });
+    } else if (kind == kRemovePlate) {
+        int32_t corners[64], twins[64]; int n = 0;
+        for_each_plate(vehicle, 64, [&](int32_t p, const int32_t* ids, int count) { if (p != id) return true; n = count; std::copy(ids, ids + count, corners); return false; });
+        bool all = n >= 3;
+        for (int i = 0; i < n && all; ++i) all = (twins[i] = mirrored_node(vehicle, corners[i], plane)) >= 0;
+        if (all)
+            for_each_plate(vehicle, 64, [&](int32_t p, const int32_t* ids, int count) { if (!same_ids(twins, n, ids, count)) return true; twin = p; return false; });
+    }
+    return twin == id ? -1 : twin;
+}
+
+void on_remove(int kind, uint8_t* peer_data, const int32_t* vehicle_id, const int32_t* id) {
+    auto original = reinterpret_cast<remove_t>(h_remove[kind].original);
+    original(peer_data, vehicle_id, id);
+    if (!vehicle_id || !id) return;
+    int32_t twin = -1;
+    {
+        std::lock_guard lock(g_mutex);
+        Plane plane;
+        const uint8_t* vehicle = mirror_target(*vehicle_id, plane);
+        if (!vehicle) return;
+        twin = mirrored_piece(kind, vehicle, *id, plane);
+        if (g_remove_logs.fetch_sub(1) > 0)
+            log(0, "remove %s %d on vehicle %d, plane %s twice=%d -> %s %d", kRemoveNames[kind], *id, *vehicle_id, kAxisNames[plane.axis], plane.twice,
+                twin >= 0 ? "mirror" : "no separate twin", twin);
+    }
+    if (twin >= 0) original(peer_data, vehicle_id, &twin);   // straight to the game: never re-enters this hook
+}
+void hk_remove_edge(uint8_t* p, const int32_t* v, const int32_t* id) { on_remove(kRemoveEdge, p, v, id); }
+void hk_remove_node(uint8_t* p, const int32_t* v, const int32_t* id) { on_remove(kRemoveNode, p, v, id); }
+void hk_remove_plate(uint8_t* p, const int32_t* v, const int32_t* id) { on_remove(kRemovePlate, p, v, id); }
+
+void hk_add_plate(uint8_t* peer_data, const int32_t* vehicle_id, anymaker::gc_vector_raw* node_ids, const bool* is_reverse, const int32_t* type) {
+    auto original = reinterpret_cast<add_plate_t>(h_add_plate.original);
+    original(peer_data, vehicle_id, node_ids, is_reverse, type);
+    if (!vehicle_id || !node_ids || !anymaker::readable(node_ids, sizeof *node_ids)) return;
+    int32_t corners[64], twins[64], sent[64]; int n = node_ids->count;
+    {
+        std::lock_guard lock(g_mutex);
+        Plane plane;
+        const uint8_t* vehicle = mirror_target(*vehicle_id, plane);
+        if (!vehicle || n < 3 || n > 64) return;
+        for (int i = 0; i < n; ++i) {
+            const int32_t* c = node_ids->at<int32_t>(i);
+            if (!c) return;
+            corners[i] = *c;
+            if ((twins[i] = mirrored_node(vehicle, corners[i], plane)) < 0) {
+                flash(L"Plate not mirrored: place the mirrored edges first");
+                if (g_plate_logs.fetch_sub(1) > 0) log(1, "plate on vehicle %d: corner node %d has no mirrored node; not mirrored", *vehicle_id, corners[i]);
+                return;
+            }
+        }
+        mirrored_corners(twins, n, sent);
+        bool same = same_ids(corners, n, sent, n);
+        if (g_plate_logs.fetch_sub(1) > 0)
+            log(0, "plate on vehicle %d with %d corners (first node %d), plane %s twice=%d -> %s", *vehicle_id, n, corners[0], kAxisNames[plane.axis], plane.twice,
+                same ? "its own mirror image, skipped" : "mirror");
+        if (same) return;
+    }
+    // The event copies the node list while it is built, so the game's own list is swapped to the mirrored
+    // corners for the second request and put straight back.
+    for (int i = 0; i < n; ++i) *node_ids->at<int32_t>(i) = sent[i];
+    original(peer_data, vehicle_id, node_ids, is_reverse, type);
+    for (int i = 0; i < n; ++i) *node_ids->at<int32_t>(i) = corners[i];
 }
 
 void draw_wall(uint8_t* overlay, const uint8_t* vehicle, const VehicleState& v, int palette_choice, double opacity) {
@@ -167,13 +270,14 @@ void draw_wall(uint8_t* overlay, const uint8_t* vehicle, const VehicleState& v, 
             box.min[0], box.min[1], box.min[2], box.max[0], box.max[1], box.max[2], transform[9], transform[10], transform[11]);
 }
 
-void on_overlay(int which, uint8_t* state, void* camera, void* client, uint8_t* scene, uint8_t* overlay) {
-    reinterpret_cast<overlay_t>(h_overlay[which].original)(state, camera, client, scene, overlay);
+// Every supported tool state keeps the vehicle it hovers or works on at the same offset.
+void after_overlay(uint8_t* state, uint8_t* scene, uint8_t* overlay) {
     if (!state || !scene || !anymaker::readable(state, 16)) return;
     uint64_t now = GetTickCount64();
     int32_t hovered = rd<int32_t>(state, kStateVehicleId);
     std::lock_guard lock(g_mutex);
     refresh_settings();
+    g_scene = scene;
     if (g_grid_size_ptr && anymaker::readable(g_grid_size_ptr, 8) && std::isfinite(*g_grid_size_ptr) && *g_grid_size_ptr > 0.001 && *g_grid_size_ptr < 10)
         g_grid_size = *g_grid_size_ptr;
     g_tool_seen = now;
@@ -195,22 +299,32 @@ void on_overlay(int which, uint8_t* state, void* camera, void* client, uint8_t* 
     auto& placed = vehicle_state(g_vehicle_id);
     if (g_enabled && g_wall && overlay) draw_wall(overlay, vehicle, placed, int(g_values[kWallColour]), g_values[kWallOpacity]);
 }
-void hk_overlay0(uint8_t* s, void* c, void* n, uint8_t* sc, uint8_t* o) { on_overlay(0, s, c, n, sc, o); }
-void hk_overlay1(uint8_t* s, void* c, void* n, uint8_t* sc, uint8_t* o) { on_overlay(1, s, c, n, sc, o); }
-void hk_overlay2(uint8_t* s, void* c, void* n, uint8_t* sc, uint8_t* o) { on_overlay(2, s, c, n, sc, o); }
-void hk_overlay3(uint8_t* s, void* c, void* n, uint8_t* sc, uint8_t* o) { on_overlay(3, s, c, n, sc, o); }
+template <int I> void hk_overlay(uint8_t* s, void* c, void* n, uint8_t* sc, uint8_t* o) {
+    reinterpret_cast<overlay_t>(h_overlay[I].original)(s, c, n, sc, o);
+    after_overlay(s, sc, o);
+}
+template <int I> void hk_plate_overlay(uint8_t* s, void* item, void* c, void* n, uint8_t* sc, uint8_t* o) {
+    reinterpret_cast<plate_overlay_t>(h_overlay[I].original)(s, item, c, n, sc, o);
+    after_overlay(s, sc, o);
+}
+void* const kOverlayHooks[kOverlayCount] = {(void*)&hk_overlay<0>, (void*)&hk_overlay<1>, (void*)&hk_overlay<2>, (void*)&hk_overlay<3>,
+    (void*)&hk_overlay<4>, (void*)&hk_overlay<5>, (void*)&hk_overlay<6>, (void*)&hk_overlay<7>, (void*)&hk_overlay<8>,
+    (void*)&hk_plate_overlay<9>, (void*)&hk_plate_overlay<10>};
+void* const kRemoveHooks[kRemoveCount] = {(void*)&hk_remove_edge, (void*)&hk_remove_node, (void*)&hk_remove_plate};
 
 // ------------------------------------------------------------------ install (background thread)
 void install_hooks() {
     using namespace anymaker::experimental;
-    void* hooks[4] = {(void*)&hk_overlay0, (void*)&hk_overlay1, (void*)&hk_overlay2, (void*)&hk_overlay3};
-    const anymaker::func_desc* overlays[4] = {&bind::edge_hover_overlay, &bind::edge_drag_overlay, &bind::edge2_hover_overlay, &bind::edge2_drag_overlay};
+    const anymaker::func_desc* overlays[kOverlayCount] = {&bind::edge_hover_overlay, &bind::edge_drag_overlay, &bind::edge2_hover_overlay, &bind::edge2_drag_overlay,
+        &bind::remove_hover_overlay, &bind::remove_component_overlay, &bind::remove_edge_overlay, &bind::remove_node_overlay, &bind::remove_plate_overlay,
+        &bind::plate_hover_overlay, &bind::plate_select_overlay};
+    const anymaker::func_desc* removes[kRemoveCount] = {&bind::client_push_remove_edge, &bind::client_push_remove_node, &bind::client_push_remove_plate};
     for (int attempt = 0; attempt < 180 && !g_stop; ++attempt) {
         if (attempt) Sleep(1000);
         if (!matching_build()) { if (attempt == 0) log(1, "game build does not match the SDK reference; AnyMirror stays off"); return; }
         void** push = hook_cell(bind::client_push_add_edge);
-        void** cells[4]; bool all = push != nullptr;
-        for (int i = 0; i < 4; ++i) cells[i] = hook_cell(*overlays[i]);
+        void** cells[kOverlayCount]; bool all = push != nullptr;
+        for (int i = 0; i < kOverlayCount; ++i) cells[i] = hook_cell(*overlays[i]);
         // The hover states have no SDK route to their cell: find it by its entry point next to the drag state's.
         for (int i : {0, 2}) {
             if (cells[i] || !cells[i + 1]) continue;
@@ -219,6 +333,9 @@ void install_hooks() {
             log(cells[i] ? 0 : 1, "edge tool %d hover overlay: entry %s, cell %s", i / 2 + 1, entry ? "found" : "missing", cells[i] ? "found by scan" : "not found");
         }
         all = all && cells[1] && cells[3];   // hover overlays are optional: without them the wall and keys work while dragging only
+        // The remove and add plate tools are optional too; cells without an SDK route are found the same way, next to
+        // the edge tool's (both are still unhooked here).
+        auto locate = [&](const anymaker::func_desc& d) { void** c = hook_cell(d); return c || !all ? c : cell_scan::find_cell(function(d), push); };
         void* box = function(bind::overlay_add_vehicle_box);
         void* line = function(bind::overlay_add_vehicle_line);
         void* transform = function(bind::client_vehicle_render_transform);
@@ -226,12 +343,25 @@ void install_hooks() {
             if (attempt == 179) log(2, "could not locate the edge tool (push=%d hover=%d drag=%d hover2=%d drag2=%d)", !!push, !!cells[0], !!cells[1], !!cells[2], !!cells[3]);
             continue;
         }
+        for (int i = kEdgeOverlays; i < kOverlayCount; ++i) if (!cells[i]) cells[i] = locate(*overlays[i]);
+        void** remove_cells[kRemoveCount];
+        for (int i = 0; i < kRemoveCount; ++i) remove_cells[i] = locate(*removes[i]);
+        void** plate_cell = locate(bind::client_push_add_plate);
+        bool remove_ok = remove_cells[0] && remove_cells[1] && remove_cells[2] && cells[4], plate_ok = plate_cell && cells[9] && cells[10];
+        log(remove_ok && plate_ok ? 0 : 1, "remove tool: requests %d/%d/%d, states %d%d%d%d%d; add plate tool: request %d, states %d%d",
+            !!remove_cells[0], !!remove_cells[1], !!remove_cells[2], !!cells[4], !!cells[5], !!cells[6], !!cells[7], !!cells[8], !!plate_cell, !!cells[9], !!cells[10]);
         g_box_fn = box; g_line_fn = line; g_transform_fn = transform;
         g_grid_size_ptr = static_cast<const double*>(global(bind::g_vehicle_grid_size));
         if (!box || !line || !transform) log(1, "wall drawing unavailable (box=%d line=%d transform=%d); mirroring still works", !!box, !!line, !!transform);
         bool ok = h_push.install(push, (void*)&hk_push_edge);
-        for (int i = 0; i < 4 && ok; ++i) ok = !cells[i] || h_overlay[i].install(cells[i], hooks[i]);
+        for (int i = 0; i < kEdgeOverlays && ok; ++i) ok = !cells[i] || h_overlay[i].install(cells[i], kOverlayHooks[i]);
         if (!ok) { log(2, "a hook cell was already taken or not writable; AnyMirror is off"); return; }
+        // Optional tools: a cell that will not hook only turns that piece off.
+        for (int i = kEdgeOverlays; i < kOverlayCount; ++i)
+            if (cells[i] && !h_overlay[i].install(cells[i], kOverlayHooks[i])) log(1, "tool overlay %d could not be hooked", i);
+        if (remove_ok) for (int i = 0; i < kRemoveCount; ++i)
+            if (!h_remove[i].install(remove_cells[i], kRemoveHooks[i])) log(1, "remove %s request could not be hooked; not mirrored", kRemoveNames[i]);
+        if (plate_ok && !h_add_plate.install(plate_cell, (void*)&hk_add_plate)) log(1, "add plate request could not be hooked; plates are not mirrored");
         g_ready = true;
         log(0, "Ready after %d s: grid size %s, wall %s. Equip an edge tool and press the mirror key.", attempt,
             g_grid_size_ptr ? "found" : "default 0.25 m", g_box_fn ? "available" : "unavailable");
@@ -239,8 +369,9 @@ void install_hooks() {
     }
 }
 void remove_hooks() {
-    void* hooks[4] = {(void*)&hk_overlay0, (void*)&hk_overlay1, (void*)&hk_overlay2, (void*)&hk_overlay3};
-    for (int i = 3; i >= 0; --i) h_overlay[i].remove(hooks[i]);
+    h_add_plate.remove((void*)&hk_add_plate);
+    for (int i = kRemoveCount - 1; i >= 0; --i) h_remove[i].remove(kRemoveHooks[i]);
+    for (int i = kOverlayCount - 1; i >= 0; --i) h_overlay[i].remove(kOverlayHooks[i]);
     h_push.remove((void*)&hk_push_edge);
 }
 
@@ -289,7 +420,7 @@ void handle(int action) {
     VehicleState* v = it != g_vehicles.end() ? &it->second : nullptr;
     wchar_t msg[96];
     switch (action) {
-    case kToggle: g_enabled = !g_enabled; flash(g_enabled ? L"Mirror on: edges are placed in pairs" : L"Mirror off"); break;
+    case kToggle: g_enabled = !g_enabled; flash(g_enabled ? L"Mirror on: building and removing in pairs" : L"Mirror off"); break;
     case kWall: g_wall = !g_wall; flash(g_wall ? L"Mirror wall shown" : L"Mirror wall hidden"); break;
     case kAxis:
         g_axis = (g_axis + 1) % 3;
@@ -351,14 +482,14 @@ extern "C" __declspec(dllexport) void AnyAPI_ModReady() {
     settings = static_cast<const AnyHelpersSettingsV1*>(services->query("anyhelpers.settings", 1));
     if (settings && settings->struct_size == sizeof(*settings) && settings->version == 1 && settings->register_setting && settings->get && settings->revision) {
         const char* ids[] = {"show_status", "wall_default", "wall_colour", "wall_opacity"};
-        const char* labels[] = {"Show mirror status while an edge tool is equipped", "Show the mirror wall by default", "Mirror wall colour", "Mirror wall strength (%)"};
+        const char* labels[] = {"Show mirror status while a building tool is equipped", "Show the mirror wall by default", "Mirror wall colour", "Mirror wall strength (%)"};
         uint32_t kinds[] = {ANY_SETTING_BOOL, ANY_SETTING_BOOL, ANY_SETTING_CHOICE, ANY_SETTING_INTEGER};
-        double lo[] = {0, 0, 0, 10}, hi[] = {1, 1, 3, 90}, step[] = {1, 1, 1, 5};
+        double lo[] = {0, 0, 0, 10}, hi[] = {1, 1, 3, 100}, step[] = {1, 1, 1, 5};
         for (int i = 0; i < kSettingCount; ++i) {
             AnyModSettingV1 d; d.mod_id = kModId; d.mod_name = "AnyMirror"; d.setting_id = ids[i]; d.label = labels[i]; d.order = i; d.kind = kinds[i];
             d.default_number = g_values[i]; d.minimum = lo[i]; d.maximum = hi[i]; d.step = step[i];
             if (i == kWallColour) { d.choices = kPaletteNames; d.choice_count = 4; }
-            if (i == 0) d.description = "Mirroring works only with the edge tools. Keys are in Controls under AnyMirror.";
+            if (i == 0) d.description = "Mirroring works with the edge, add plate and remove tools. Keys are in Controls under AnyMirror.";
             g_tokens[i] = settings->register_setting(&d);
         }
     } else settings = nullptr;

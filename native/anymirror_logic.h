@@ -47,6 +47,22 @@ inline Plane nudged(Plane p, int32_t half_steps) {
     return p;
 }
 
+// True when a and b hold the same ids, in any order (a plate is the same plate whichever corner it starts at).
+inline bool same_ids(const int32_t* a, int na, const int32_t* b, int nb) {
+    if (na != nb) return false;
+    for (int i = 0; i < na; ++i) {
+        int in_a = 0, in_b = 0;
+        for (int j = 0; j < na; ++j) { in_a += a[j] == a[i]; in_b += b[j] == a[i]; }
+        if (in_a != in_b) return false;
+    }
+    return true;
+}
+// The corners of a plate's mirror image, from the mirrored id of each corner: in reverse order, so the mirrored
+// plate winds the other way and faces the mirrored direction.
+inline void mirrored_corners(const int32_t* twin_of_corner, int n, int32_t* out) {
+    for (int i = 0; i < n; ++i) out[i] = twin_of_corner[n - 1 - i];
+}
+
 struct Box { double min[3], max[3]; };
 // The visible wall in vehicle-local metres: a thin slab on the plane covering the build's node bounds plus a
 // margin of `margin` grid steps on the other two axes.

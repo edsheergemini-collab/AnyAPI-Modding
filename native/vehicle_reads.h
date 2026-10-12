@@ -23,7 +23,17 @@ constexpr ptrdiff_t vehicle_plates = 184 + 8;        // m_plates -> vector<ref<v
 // client_scene.vehicle_grid
 constexpr ptrdiff_t grid_components = 40 + 8;        // m_components -> vector<ref<vehicle_component>>
 // client_scene.vehicle_node
+constexpr ptrdiff_t node_id = 8;                     // s32
 constexpr ptrdiff_t node_grid_pos = 16 + 8;          // property_vec3_s32 _m_value
+// client_scene.vehicle_edge
+constexpr ptrdiff_t edge_id = 8;                     // s32
+constexpr ptrdiff_t edge_node_id_0 = 16 + 8;         // property_s32 _m_value
+constexpr ptrdiff_t edge_node_id_1 = 32 + 8;
+// client_scene.vehicle_plate
+constexpr ptrdiff_t plate_id = 8;                    // s32
+constexpr ptrdiff_t plate_nodes = 16 + 8;            // m_nodes -> vector<ref<vehicle_plate_node>>
+// client_scene.vehicle_plate_node
+constexpr ptrdiff_t plate_node_id = 8 + 8;           // property_s32 _m_value
 // client_scene.vehicle_component
 constexpr ptrdiff_t component_id = 8;                // s32
 constexpr ptrdiff_t component_definition = 176;      // ptr<const vehicle_component_definition>
@@ -75,6 +85,47 @@ inline bool node_bounds(const uint8_t* vehicle, Vec3i& lo, Vec3i& hi, int* count
     });
     if (count) *count = n;
     return any;
+}
+
+// Grid position of node `id`. False when the vehicle has no such node.
+inline bool node_pos(const uint8_t* vehicle, int32_t id, Vec3i& out) {
+    bool found = false;
+    for_each_ref(vehicle + off::vehicle_nodes, 1 << 20, [&](uint8_t* node) {
+        if (!anymaker::readable(node, 48) || rd<int32_t>(node, off::node_id) != id) return true;
+        out = rd<Vec3i>(node, off::node_grid_pos); found = true; return false;
+    });
+    return found;
+}
+// Id of the node at grid position `p`, or -1.
+inline int32_t node_at(const uint8_t* vehicle, const Vec3i& p) {
+    int32_t id = -1;
+    for_each_ref(vehicle + off::vehicle_nodes, 1 << 20, [&](uint8_t* node) {
+        if (!anymaker::readable(node, 48) || !(rd<Vec3i>(node, off::node_grid_pos) == p)) return true;
+        id = rd<int32_t>(node, off::node_id); return false;
+    });
+    return id;
+}
+// Visits (id, node id 0, node id 1) of every edge of a vehicle; stop by returning false.
+template <class F> void for_each_edge(const uint8_t* vehicle, F&& visit) {
+    for_each_ref(vehicle + off::vehicle_edges, 1 << 20, [&](uint8_t* edge) {
+        if (!anymaker::readable(edge, 48)) return true;
+        return visit(rd<int32_t>(edge, off::edge_id), rd<int32_t>(edge, off::edge_node_id_0), rd<int32_t>(edge, off::edge_node_id_1));
+    });
+}
+// Visits (id, node ids, count) of every plate of a vehicle with at most `max_nodes` corners; stop by returning false.
+template <class F> void for_each_plate(const uint8_t* vehicle, int max_nodes, F&& visit) {
+    int32_t ids[64];
+    if (max_nodes > 64) max_nodes = 64;
+    for_each_ref(vehicle + off::vehicle_plates, 1 << 20, [&](uint8_t* plate) {
+        if (!anymaker::readable(plate, 64)) return true;
+        int n = 0; bool fits = true;
+        for_each_ref(plate + off::plate_nodes, 4096, [&](uint8_t* pn) {
+            if (n >= max_nodes) { fits = false; return false; }
+            if (anymaker::readable(pn, 24)) ids[n++] = rd<int32_t>(pn, off::plate_node_id);
+            return true;
+        });
+        return !fits || visit(rd<int32_t>(plate, off::plate_id), static_cast<const int32_t*>(ids), n);
+    });
 }
 
 // Visits every component of a vehicle across all of its grids.
