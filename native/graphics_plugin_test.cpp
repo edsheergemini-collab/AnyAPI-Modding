@@ -75,25 +75,25 @@ int wmain(int argc,wchar_t** argv){std::cout<<std::unitbuf;std::cerr<<std::unitb
  apply(LocalBeams,0);assert(!lighting_policy.enabled);apply(LocalBeams,2);apply(Preset,0);assert(!lighting_policy.enabled);apply(Preset,3);assert(lighting_policy.enabled);
  // Exercise real menu selection and submitted policy, not just the profile helper.
  // Presets 1-6: Performance, Low, Medium, High, Ultra, Cinematic.
- const float densities[]={.002f,.002f,.001f,.001f,.001f,.001f},sun_strength[]={0,.5f,1,1,2,2.6f},local_strength[]={0,.5f,1,2,2.2f,3.9f};
- const uint32_t quality[]={0,0,1,2,3,3},budgets[]={2,2,4,6,8,8};
- const float clarity[]={.85f,.85f,.85f,.85f,.85f,.85f},reach[]={60,60,120,120,250,250},sharpening[]={0,0,0,.3f,.3f,.55f};const uint32_t methods[]={1,1,3,3,4,4};
+ const float densities[]={.002f,.002f,.001f,.001f,.001f,.001f},sun_strength[]={0,.5f,1,2,3,3.9f},local_strength[]={0,.5f,1,2,3.3f,3.9f};
+ const uint32_t quality[]={0,0,1,3,3,3},budgets[]={2,2,4,8,8,8};
+ const float clarity[]={.85f,.85f,.85f,.85f,1,1},reach[]={60,60,120,120,250,250},sharpening[]={0,0,0,.3f,.3f,.55f};const uint32_t methods[]={1,1,3,3,4,4};
  for(int preset=1;preset<=6;++preset){apply(Preset,preset);auto i=preset-1;std::cout<<"PRESET "<<preset<<" enabled="<<lighting_policy.enabled<<" density="<<lighting_policy.fog_density<<" sun="<<lighting_policy.sun_shafts<<" local="<<local_policy.local_strength<<" quality="<<lighting_policy.quality<<" budget="<<local_policy.local_budget<<" height="<<lighting_policy.height_falloff<<std::endl;assert(lighting_policy.enabled==(preset>1)&&lighting_policy.fog_density==densities[i]&&std::abs(lighting_policy.sun_shafts-sun_strength[i])<.001f&&std::abs(local_policy.local_strength-local_strength[i])<.001f&&lighting_policy.quality==quality[i]&&local_policy.local_budget==budgets[i]&&lighting_policy.height_falloff==0);
   assert(shaped_policy.clarity==clarity[i]&&shaped_policy.beam_reach==reach[i]&&shaped_policy.sun_response==1&&shaped_policy.temporal==1);
   assert(aa2_policy.enabled==(preset>1)&&(preset==1||aa2_policy.method==methods[i])&&std::abs(aa2_policy.sharpening-sharpening[i])<.001f);
   // Finishing: Filmic from Low up; Vivid from Ultra; bloom and glare grow with the preset.
-  const float scene_bloom[]={0,.25f,.25f,.45f,.45f,.7f};const uint32_t looks[]={0,0,0,0,5,3};
+  const float scene_bloom[]={0,.25f,.25f,.45f,.7f,.7f};const uint32_t looks[]={0,0,0,5,5,3};
   assert(effects_policy.enabled==(preset>1)&&(preset==1||effects_policy.tonemap==1)&&(preset==1||effects_policy.look==looks[i])&&(preset==1||std::abs(effects_policy.bloom-scene_bloom[i])<.001f)&&effects_policy.eye_adaptation==1);
   // Detailed shading from Medium up; Performance and Low keep the game's SSAO.
-  const float ao_radius[]={1,1,1,.75f,1,1};assert(effects_policy.ambient_occlusion==(preset>=4)&&effects_policy.finish==(preset>1)&&effects_policy.ao_radius==ao_radius[i]);
+  const float ao_radius[]={1,1,1,.75f,.75f,.75f};assert(effects_policy.ambient_occlusion==(preset>=4)&&effects_policy.finish==(preset>1)&&effects_policy.ao_radius==ao_radius[i]);
   // Night sky and moonlight from Low up; Cinematic has the brightest stars.
-  const float stars[]={0,.6f,1,1,1,1.5f};assert(effects_policy.night_sky==(preset>1)&&effects_policy.stars==stars[i]&&effects_policy.moonlight==(preset>2?1.f:preset==2?.6f:0.f));
-  const float contact[]={.6f,.6f,.3f,.6f,.6f,1};assert(effects_policy.contact_shadows==(preset>=3)&&effects_policy.contact_length==contact[i]);
-  const float bounce[]={0,0,0,.5f,1,1.5f};assert(effects_policy.bounce_light==bounce[i]);
+  const float stars[]={0,.6f,1,1,1.5f,1.5f};assert(effects_policy.night_sky==(preset>1)&&effects_policy.stars==stars[i]&&effects_policy.moonlight==(preset>2?1.f:preset==2?.6f:0.f));
+  const float contact[]={.6f,.6f,.3f,.6f,1,1};assert(effects_policy.contact_shadows==(preset>=3)&&effects_policy.contact_length==contact[i]);
+  const float bounce[]={0,0,0,1,1.5f,1.5f};assert(effects_policy.bounce_light==bounce[i]);
   // Depth of field and motion blur are Cinematic only.
   assert(effects_policy.depth_of_field==(preset==6?.5f:0.f)&&effects_policy.motion_blur==(preset==6?.4f:0.f));
-  const float reach[]={1,1,1,1.5f,1.5f,2};assert(effects_policy.draw_distance==reach[i]);
-  const float sun[]={0,.6f,1,1,1,1},cloud[]={0,0,.6f,1,1,1};assert(effects_policy.sun_disc==sun[i]&&effects_policy.clouds==cloud[i]);}
+  const float reach[]={1,1,1,1.5f,2,3};assert(effects_policy.draw_distance==reach[i]);
+  const float sun[]={0,.6f,1,1,1.5f,1.5f},cloud[]={0,0,.6f,1,1.5f,1.5f};assert(effects_policy.sun_disc==sun[i]&&effects_policy.clouds==cloud[i]);}
  // Looks: Natural keeps the game's colours, Vibrant is the shader-pack look, Moody a darker grade; all keep fog light.
  apply(Preset,NaturalProfile);assert(effects_policy.tonemap==2&&effects_policy.look==0&&effects_policy.vignette==0&&lighting_policy.fog_strength==0);
  apply(Preset,VibrantProfile);assert(effects_policy.look==5&&effects_policy.look_strength==1&&effects_policy.clouds==1.5f&&effects_policy.sun_disc==1.5f&&lighting_policy.fog_density==.001f&&shaped_policy.clarity==1);

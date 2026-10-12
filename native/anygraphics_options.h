@@ -98,18 +98,19 @@ inline Values profile(const Values& current,int level){
  auto tier=size_t(level==VibrantProfile?4:level>=NaturalProfile?3:level-1);
  static constexpr float aa[]={2,3,5,5,6,6},aa_quality[]={1,1,2,2,3,3},sharpen[]={0,0,0,1,1,2};
  v[NativeAA]=aa[tier];v[AAQuality]=aa_quality[tier];v[Sharpening]=sharpen[tier];
- v[NativeSSAO]=level>=3?2.f:1.f;static constexpr float ao[]={0,0,0,1,2,2};v[DetailedAO]=ao[tier];static constexpr float night[]={0,1,2,2,2,3},moon[]={0,1,2,2,2,2};v[NightSky]=night[tier];v[Moonlight]=moon[tier];static constexpr float contact[]={0,0,1,2,2,3};v[ContactShadows]=contact[tier];static constexpr float bounce[]={0,0,0,1,2,3};v[BounceLight]=bounce[tier];static constexpr float lens[]={0,0,0,0,0,1};v[DepthOfField]=lens[tier];v[MotionBlur]=lens[tier];static constexpr float object_reach[]={0,0,0,1,1,2};v[DrawDistance]=object_reach[tier];static constexpr float sun_levels[]={0,1,2,2,2,2},cloud_tiers[]={0,0,1,2,2,2};v[SunDisc]=sun_levels[tier];v[CloudLayer]=cloud_tiers[tier];v[NativeShadows]=level>=2?2.f:1.f;v[NativeFogBlur]=level>=3?2.f:1.f;
+ v[NativeSSAO]=level>=3?2.f:1.f;static constexpr float ao[]={0,0,0,1,1,1};v[DetailedAO]=ao[tier];static constexpr float night[]={0,1,2,2,3,3},moon[]={0,1,2,2,2,2};v[NightSky]=night[tier];v[Moonlight]=moon[tier];static constexpr float contact[]={0,0,1,2,3,3};v[ContactShadows]=contact[tier];static constexpr float bounce[]={0,0,0,2,3,3};v[BounceLight]=bounce[tier];static constexpr float lens[]={0,0,0,0,0,1};v[DepthOfField]=lens[tier];v[MotionBlur]=lens[tier];static constexpr float object_reach[]={0,0,0,1,2,3};v[DrawDistance]=object_reach[tier];static constexpr float sun_levels[]={0,1,2,2,3,3},cloud_tiers[]={0,0,1,2,3,3};v[SunDisc]=sun_levels[tier];v[CloudLayer]=cloud_tiers[tier];v[NativeShadows]=level>=2?2.f:1.f;v[NativeFogBlur]=level>=3?2.f:1.f;
  static constexpr float bloom[]={0,.05f,.1f,.2f,.35f,.35f};v[NativeBloom]=level>=2?2.f:1.f;v[BloomAmount]=bloom[tier];v[BloomThreshold]=.75f;
  // Fog and beams are artistic strengths, not sample quality. High tiers add
  // samples and lights but keep fog light: no preset goes past Low volumetric
  // fog or Medium base fog, since thick fog washes the whole scene out.
- static constexpr float atmosphere[]={0,0,1,1,1,1},beams[]={0,1,2,2,3,3},local[]={0,1,2,3,3,4},quality[]={0,0,1,2,3,3};
- static constexpr float sun_intensity[]={1,1,1,1,1,1.3f},local_intensity[]={1,1,1,1,1.1f,1.3f},focus[]={1,1,1,1,2,2},clarity[]={1,1,1,1,1,1},reach[]={0,0,1,1,2,2},fog[]={0,.35f,.65f,.65f,.65f,.65f};
+ static constexpr float atmosphere[]={0,0,1,1,1,1},beams[]={0,1,2,3,4,4},local[]={0,1,2,3,4,4},quality[]={0,0,1,3,3,3};
+ static constexpr float sun_intensity[]={1,1,1,1,1,1.3f},local_intensity[]={1,1,1,1,1.1f,1.3f},focus[]={1,1,1,1,2,2},clarity[]={1,1,1,1,0,0},reach[]={0,0,1,1,2,2},fog[]={0,.35f,.65f,.65f,.65f,.65f};
  v[Atmosphere]=atmosphere[tier];v[SunShafts]=beams[tier];v[LocalBeams]=local[tier];v[LightingQuality]=v[LocalBudget]=quality[tier];
  v[ShaftIntensity]=sun_intensity[tier];v[LocalIntensity]=local_intensity[tier];v[BeamFocus]=focus[tier];v[GroundFog]=0;
  v[ShaftClarity]=clarity[tier];v[BeamReach]=reach[tier];v[SunResponse]=1;v[TemporalLighting]=1;
- // Finishing: Filmic from Low up, the shader-pack look on Ultra, a film grade on Cinematic.
- static constexpr float tone[]={0,2,2,2,2,2},look[]={0,0,0,0,5,3},strength[]={1,1,1,1,1,2},scene_bloom[]={0,1,1,2,2,3},glare[]={0,1,1,2,2,2},vignette[]={0,0,0,0,1,1};
+ // Finishing: Filmic from Low up, a subtle Vivid on High, Vivid on Ultra, a strong film grade on Cinematic.
+ // High tiers turn the heavier effects up, but beams stay Clear (light only through gaps) so they never read as fog.
+ static constexpr float tone[]={0,2,2,2,2,2},look[]={0,0,0,5,5,3},strength[]={1,1,1,0,1,2},scene_bloom[]={0,1,1,2,3,3},glare[]={0,1,1,2,3,3},vignette[]={0,0,0,0,1,2};
  v[ToneMapping]=tone[tier];v[ColourLook]=look[tier];v[LookStrength]=strength[tier];v[EyeAdaptation]=1;v[Brightness]=0;v[SceneBloom]=scene_bloom[tier];v[SunGlare]=glare[tier];v[Vignette]=vignette[tier];
  v[Clouds]=level==1?1.f:0.f;v[Grass]=level==1||level==2?1.f:0.f;v[Foliage]=0;v[FogDensity]=fog[tier];
  if(level==NaturalProfile){ // The game's own colours, only cleaner.

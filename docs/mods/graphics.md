@@ -29,8 +29,8 @@ The **Finish** rows grade the HDR scene before the game's tone mapping, using
   moment, then returns to the game's own day and night brightness.
 - **Brightness (stops)**, **Bloom**, **Sun glare** and **Vignette**.
 
-Presets use Filmic from Low up and add Vivid on Ultra; Cinematic uses a
-strong teal & orange film grade with strong bloom and a light vignette.
+Presets use Filmic from Low up, a subtle Vivid on High and Vivid on Ultra; Cinematic uses a
+strong teal & orange film grade with strong bloom and a medium vignette.
 
 **Detailed shading** (Off, Low, Medium or High, next to Ambient occlusion)
 replaces the game's ambient occlusion with softer, deeper contact shading in
@@ -117,9 +117,9 @@ washes out the whole scene. More fog is available in Custom.
 | Performance | SSAO, shadows, fog blur, bloom, base fog, clouds and grass off | FXAA |
 | Low | Shadows on, low bloom/base fog; SSAO, fog blur and grass off | SMAA Medium |
 | Balanced | Native effects on; medium bloom/base fog, contact shadows Low | TAA High |
-| High | Native effects on; high bloom, medium base fog | TAA High, sharpening Low |
-| Ultra | Native effects on; ultra bloom, medium base fog, Vivid look | TAA + jitter Ultra, sharpening Low |
-| Cinematic | As Ultra, with a teal & orange film grade, stronger beams, local lights, depth of field and motion blur | TAA + jitter Ultra, sharpening Medium |
+| High | Native effects on; high bloom, medium base fog; subtle Vivid look, Medium bounce light, Medium contact shadows, strong local beams | TAA High, sharpening Low |
+| Ultra | As High with a Vivid look, strong bloom and glare, High bounce light and contact shadows, bright sun, many clouds, very far objects and clear sun beams | TAA + jitter Ultra, sharpening Low |
+| Cinematic | As Ultra, with a strong teal & orange film grade, a medium vignette, stronger beams, extreme object distance, depth of field and motion blur | TAA + jitter Ultra, sharpening Medium |
 | Natural | High, with Clean tone mapping, no colour look or vignette, softer bloom and glare, no volumetric fog | TAA High, sharpening Low |
 | Vibrant | Ultra, with a strong Vivid look, many clouds, a bright sun and stars, strong clear sun beams and low base fog | TAA + jitter Ultra, sharpening Low |
 | Moody | High, with a strong warm golden-hour grade, a medium vignette, strong sun beams, light haze and many clouds | TAA High, sharpening Low |
