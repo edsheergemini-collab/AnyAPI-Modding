@@ -1,6 +1,8 @@
 #pragma once
 // AnyMirror plane math. Pure and platform-free so it is unit tested without the game.
 // Positions are vehicle grid coordinates (vec3_s32), the same values the edge tool sends to the server.
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 
 namespace anymirror {
@@ -61,5 +63,35 @@ inline Box wall(const Plane& plane, const Grid& lo, const Grid& hi, double grid_
         }
     }
     return b;
+}
+
+// The game's overlay boxes have no opacity input (the palette value only picks a shade on gradient palettes),
+// so wall strength is drawn as a lattice: bars along the build's grid lines on both in-plane axes, covering
+// `strength` (0.05 to 1) of the wall's area. Full strength is the solid slab. Returns the number of boxes
+// written to `out`; never more than kLatticeMax.
+constexpr int kLatticeBars = 40;                       // most bars per axis; wider builds space them out
+constexpr int kLatticeMax = 2 * (kLatticeBars + 2);
+inline int wall_lattice(const Box& slab, int axis, double grid_size, double strength, Box* out) {
+    if (!(strength >= 0.05)) strength = 0.05;
+    if (strength >= 0.995 || !(grid_size > 0) || axis < 0 || axis > 2) { out[0] = slab; return 1; }
+    int n = 0;
+    for (int k = 1; k <= 2; ++k) {
+        int along = (axis + k) % 3;
+        double lo = slab.min[along], hi = slab.max[along];
+        int steps = int(std::ceil((hi - lo) / grid_size - 1e-9));
+        int every = steps > kLatticeBars ? (steps + kLatticeBars - 1) / kLatticeBars : 1;
+        double pitch = every * grid_size;
+        // Two crossing bar sets of width w over pitch p cover 1 - (1 - w/p)^2 of the area.
+        double half = 0.5 * pitch * (1.0 - std::sqrt(1.0 - strength));
+        for (int i = 0; i <= kLatticeBars + 1; ++i) {
+            double centre = lo + i * pitch;
+            if (centre > hi + 1e-9) break;
+            Box bar = slab;
+            bar.min[along] = std::max(lo, centre - half);
+            bar.max[along] = std::min(hi, centre + half);
+            out[n++] = bar;
+        }
+    }
+    return n;
 }
 }  // namespace anymirror

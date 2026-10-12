@@ -34,6 +34,9 @@ Edges that are their own mirror image (lying in the plane, or crossing it symmet
 | Mirror wall colour | Tool blue (also Valid green, Hover, Group) |
 | Mirror wall strength (%) | 35 |
 
+The game's overlay has no transparency control, so the wall is drawn as a grid lattice along the build's
+grid lines. Wall strength sets how much of the wall the lattice covers; 100% is a solid wall.
+
 ## Co-op
 
 The mirrored edge goes to the host through the same request the edge tool sends, so the host checks and
