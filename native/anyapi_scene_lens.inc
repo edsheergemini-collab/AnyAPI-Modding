@@ -19,7 +19,7 @@ static void record_lens(void* renderer,void* scene){auto p=copy();if(!p.enabled|
  float seconds=continuous?std::max(float(now-h.tick),1.f)/1000.f:1.f;
  if(continuous){f.previous_right=h.right;f.previous_up=h.up;f.previous_forward=h.forward;for(int i=0;i<3;++i)f.camera_move[i]=float(world[i]-h.position[i]);}
  f.camera_move[3]=continuous?1-std::exp(-seconds/.25f):1;
- f.params={p.depth_of_field,p.motion_blur,std::clamp(12.f*n.color.height/1080.f,4.f,32.f),float(lens_frame_index%64)};
+ f.params={p.depth_of_field,p.motion_blur,std::clamp(12.f*std::max(p.depth_of_field,1.f)*n.color.height/1080.f,4.f,48.f),float(lens_frame_index%64)};
  h.valid=true;for(int i=0;i<3;++i)h.position[i]=world[i];h.right={n.right[0],n.right[1],n.right[2],n.right[3]};h.up={n.up[0],n.up[1],n.up[2],n.up[3]};h.forward={n.forward[0],n.forward[1],n.forward[2],0};h.tick=now;h.width=n.color.width;h.height=n.color.height;
  auto list=scene_antialiasing::command_list();auto saved=scene_antialiasing::states.find(list);
  if(!scene_antialiasing::tracking||!list||saved==scene_antialiasing::states.end()||!saved->second.ready()||n.color.state!=D3D12_RESOURCE_STATE_RENDER_TARGET)return lens_bypass(620,"command_bindings_or_target_state");

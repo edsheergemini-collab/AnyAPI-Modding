@@ -26,7 +26,7 @@
 //   too coarse for (under parts, between blocks); contact_length 0.05..4 m.
 // bounce_light 0..2 adds one bounce of screen-space indirect light (lit
 //   surfaces tint nearby ones with their colour); 0 is off.
-// depth_of_field 0..2 blurs what is nearer or farther than the thing in the
+// depth_of_field 0..4 blurs what is nearer or farther than the thing in the
 //   middle of the screen (focus eases over a quarter second); motion_blur
 //   0..2 blurs the scene as the camera turns and moves (camera only: the game
 //   has no per-object motion). Both default to 0 (off); held items and

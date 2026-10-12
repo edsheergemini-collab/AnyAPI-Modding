@@ -36,7 +36,7 @@ at Strong with strong bloom and a light vignette.
 replaces the game's ambient occlusion with softer, deeper contact shading in
 corners, under parts and between blocks. It only darkens ambient light, never
 sunlight, and is hidden while Ambient occlusion is forced off. Presets use it
-from Medium up.
+from High up.
 
 **Contact shadows** (Off, Low, Medium or High) adds small, sharp sun shadows
 under parts, between blocks and where things touch the ground. Presets use it
@@ -50,7 +50,8 @@ up.
 effects. Depth of field focuses on whatever is in the middle of the screen and
 blurs what is nearer or farther. Motion blur blurs the world as the camera
 turns and moves; hands, held items and nearby cockpit parts stay sharp. Only
-the Cinematic preset turns them on (Low).
+the Cinematic preset turns them on (Low). With depth of field on, **Blur
+strength** (0.25 to 3, default 1) sets how strongly it blurs.
 
 **Object draw distance** (Game setting, Far 1.5x, Very far 2x or Extreme 3x)
 keeps characters, props, dropped items and vehicle parts drawn farther away.

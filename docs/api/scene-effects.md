@@ -52,7 +52,7 @@ trip and the image is unchanged.
 | `contact_shadows` | 0/1 | Run the contact shadow pass (see below) |
 | `contact_length` | 0.05-4 | Length of the shadow rays toward the sun, in metres |
 | `bounce_light` | 0-2 | One bounce of screen-space indirect light; 0 is off |
-| `depth_of_field` | 0-2 | Lens blur away from the focus distance; 0 (default) is off |
+| `depth_of_field` | 0-4 | Lens blur away from the focus distance; 0 (default) is off |
 | `motion_blur` | 0-2 | Camera motion blur; 0 (default) is off |
 | `sun_disc` | 0-2 | Sun disc in the game's sun colour; 0 (default) is off |
 | `clouds` | 0-2 | Drifting cloud layer, amount of cover; 0 (default) is off |
@@ -81,8 +81,10 @@ buildings in front of the sun dim it.
 The game's SSAO (8 samples, inside `renderer._record_commands_composite`) is
 followed by this pass, from the same call cell, before the lighting composite
 reads the SSAO target. It overwrites that target with Alchemy ambient
-occlusion: 12 spiral samples rotated per pixel and per frame, a world-space
-radius with falloff, a depth-aware 4x4 blur and a multi-bounce fit on the
+occlusion: 12 spiral samples with a fixed per-pixel rotation (so it does not
+crawl on foliage), a world-space radius with falloff capped at 80 pixels,
+samples that fall off screen counted as open (so the screen border never
+darkens), a depth-aware 4x4 blur and a multi-bounce fit on the
 albedo so bright surfaces do not go grey. The game multiplies only ambient and
 back light by this value, so direct sunlight is never darkened. Sky and cloud
 pixels are left unoccluded.
@@ -112,7 +114,8 @@ After the night sky and before finishing, the lens pass redraws the HDR scene
 from a copy. Depth of field focuses on the nearest of five taps around the
 screen centre (ignoring anything within a metre, such as held items) and eases
 the focus over about a quarter second; the blur radius follows the difference
-in inverse distance from the focus, up to 12 pixels at 1080p. Motion blur
+in inverse distance from the focus, up to 12 pixels at 1080p (scaled up with
+`depth_of_field` above 1, at most 48). Motion blur
 reprojects each pixel with last frame's camera (position and axes), so it
 blurs camera turns and movement only: the game has no per-object motion.
 Within about 6 m of the camera the blur fades out, so cockpits and vehicles

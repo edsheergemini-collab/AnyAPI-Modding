@@ -49,19 +49,26 @@ float4 Occlusion(Varying v) : SV_Target {
     float3 n = normalize(n4.xyz);
     float radius = params.x, pixels = radius * metrics.w * .5 / max(z * up_axis.w, .001);
     if (pixels < 1.5) return float4(1, z, 0, 1);
-    pixels = min(pixels, 160);
-    float angle = noise(v.position.xy + params.z * 5.588238) * 6.2831853, jitter = noise(v.position.yx * 1.7 + params.z * 3.1);
-    float sum = 0; const int count = 12;
+    pixels = min(pixels, 80);
+    // Fixed per-pixel rotation: a per-frame one crawls on foliage and reads as fake.
+    float angle = noise(v.position.xy) * 6.2831853, jitter = noise(v.position.yx * 1.7);
+    float sum = 0; const int count = 12; int on_screen = 0;
     [loop] for (int i = 0; i < count; ++i) {
         float t = (i + jitter) / count, a = angle + i * 2.39996323;
-        float2 offset = float2(cos(a), sin(a)) * t * pixels * metrics.xy;
-        bool s; float3 q = position(v.uv + offset, s);
+        float2 offset = float2(cos(a), sin(a)) * t * pixels * metrics.xy, uv = v.uv + offset;
+        // Off-screen samples would read the clamped edge texel and smear dark
+        // bands along the screen border; they count as open instead.
+        if (any(uv < 0) || any(uv > 1)) continue;
+        ++on_screen;
+        bool s; float3 q = position(uv, s);
         if (s) continue;
         float3 d = q - p; float dd = dot(d, d);
         float falloff = saturate(1 - dd / (radius * radius * 4));
         sum += max(0, dot(d, n) - .002 * z) / (dd + .01) * falloff;
     }
+    // Near the screen edge fewer samples land, so the shading fades out instead of jumping.
     float visibility = saturate(1 - 2 * params.y * radius * .5 * sum / count);
+    visibility = lerp(1, visibility, float(on_screen) / count);
     return float4(visibility, z, 0, 1);
 }
 // Depth-aware 4x4 blur, then the multi-bounce fit; writes the game's SSAO target.

@@ -20,6 +20,6 @@ int wmain(int argc,wchar_t** argv){assert(argc==2||argc==3);std::ofstream out;if
   if(out){out<<"inline constexpr unsigned char "<<entry<<"[]={";auto bytes=(const unsigned char*)code->GetBufferPointer();for(size_t i=0;i<code->GetBufferSize();++i)out<<unsigned(bytes[i])<<',';out<<"};\n";}}
  if(out)out<<"}\n";
  scene_lens_gpu::Frame f;f.metrics={1.f/64,1.f/64,64,64};f.right={1,0,0,.5f};f.up={0,1,0,.5f};f.forward={0,0,1,5000};f.projection={0,.1f,1,0};f.camera_move={0,0,0,1};f.params={1,1,12,0};assert(scene_lens_gpu::valid(f));
- auto bad=f;bad.params[0]=3;assert(!scene_lens_gpu::valid(bad));bad=f;bad.params[2]=0;assert(!scene_lens_gpu::valid(bad));bad=f;bad.projection={0,0,0,0};assert(!scene_lens_gpu::valid(bad));bad=f;bad.previous_up[3]=NAN;assert(!scene_lens_gpu::valid(bad));bad=f;bad.camera_move[0]=5000;assert(!scene_lens_gpu::valid(bad));
+ auto bad=f;bad.params[0]=5;assert(!scene_lens_gpu::valid(bad));bad=f;bad.params[2]=0;assert(!scene_lens_gpu::valid(bad));bad=f;bad.projection={0,0,0,0};assert(!scene_lens_gpu::valid(bad));bad=f;bad.previous_up[3]=NAN;assert(!scene_lens_gpu::valid(bad));bad=f;bad.camera_move[0]=5000;assert(!scene_lens_gpu::valid(bad));
  std::cout<<"PASS: lens shaders compile; constants and sampler slots validated\n";
 }
