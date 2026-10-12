@@ -109,13 +109,16 @@ float3 local_illumination(float3 position,float3 ray) {
     float3 result=0;
     [loop]for(uint i=0;i<(uint)fog_colour.w;++i){
         float4 location=matrices.Load(int3(0,12+i,0));
+        // Beams reach 40% past the light's own range so they fade out softly
+        // instead of ending where the lit surface does.
+        float reach=location.w*1.4;
         float3 delta=location.xyz-position;float distance=length(delta);
-        if(distance>=location.w)continue;
+        if(distance>=reach)continue;
         float3 toward_light=delta/max(distance,.001);
         float4 direction=matrices.Load(int3(1,12+i,0));
         float4 colour=matrices.Load(int3(2,12+i,0));
         float4 properties=matrices.Load(int3(3,12+i,0));
-        float attenuation=pow(saturate(1-distance/location.w),2);
+        float attenuation=pow(saturate(1-distance/reach),2);
         if(colour.w>.5)attenuation*=smoothstep(direction.w,min(.9999,direction.w+.08),dot(direction.xyz,-toward_light));
         if(attenuation<=.00001)continue;
         float visible=1;
@@ -125,7 +128,9 @@ float3 local_illumination(float3 position,float3 ray) {
             if(any(uv<0)||any(uv>1)||p.z<0||p.z>1)continue;
             float stored=shadow_sample(cascade,uv);visible=properties.y>1.5?(p.z>=stored-.00002?1:0):(p.z<=stored+.00002?1:0);
         }
-        float g=medium.w,mu=dot(ray,toward_light);float phase=(1-g*g)/pow(max(1+g*g-2*g*mu,.001),1.5);
+        // Looking straight into a lamp, a strong forward peak (up to ~19x with
+        // Focused) whited out the screen. Lights use a gentler lobe, capped.
+        float g=min(medium.w,.5),mu=dot(ray,toward_light);float phase=min((1-g*g)/pow(max(1+g*g-2*g*mu,.001),1.5),3);
         result+=colour.rgb*attenuation*visible*phase*sun_colour.w;
     }
     return result;
@@ -154,7 +159,7 @@ float4 Integrate(Varying v) : SV_Target {
     float jitter=temporal?frac(52.9829189*frac(dot(v.position.xy,float2(.06711056,.00583715)))+matrices.Load(int3(3,20,0)).w*.61803399):.5;
     // Fog owns extinction and ambient haze. Beams use a fixed, clear-air
     // scattering medium so their brightness does not depend on the fog tier.
-    float transmittance=1,beam_transmittance=1,local_transmittance=1;float3 scattered=0;
+    float transmittance=1,beam_transmittance=1,local_transmittance=1;float3 scattered=0,lamps=0;
     float beam_lit=0,beam_total=0;
     [loop]for(uint i=0;i<count;++i) {
         // Quadratic spacing resolves nearby branch shadows without more samples.
@@ -170,7 +175,8 @@ float4 Integrate(Varying v) : SV_Target {
         // Beam reach fades distant clear air, which otherwise piles up into
         // a uniform veil over everything far away.
         if(shape.y>0)beam_weight*=exp(-d/shape.y);
-        float local_segment=exp(-.02*step);
+        // Clear air for lamp beams: denser air turned every lamp into a glowing fog ball.
+        float local_segment=exp(-.006*step);
         float local_weight=transmittance*local_transmittance*(1-local_segment);
         float lit=visibility(position);
         beam_lit+=lit*beam_weight;beam_total+=beam_weight;
@@ -178,13 +184,18 @@ float4 Integrate(Varying v) : SV_Target {
         // hill) is darker and sunlit air brighter, at the same average level.
         // A flat fog colour read as an evenly milky wall.
         float fog_light=shape.x>0?lerp(.45,1.35,lit):1;
-        scattered+=fog_colour.rgb*fog_weight*fog_light+local_illumination(position,ray)*local_weight;
+        scattered+=fog_colour.rgb*fog_weight*fog_light;lamps+=local_illumination(position,ray)*local_weight;
         transmittance*=segment;beam_transmittance*=beam_segment;local_transmittance*=local_segment;
         if(transmittance<.001)break;
     }
     // Clarity keeps beams where the ray crosses shadow edges (gaps in trees,
     // windows, terrain) and thins the glow of rays that are lit end to end,
     // which is what read as fog. 0 keeps the original uniform scattering.
+    // Lamp glow rolls off softly instead of blowing out, and fades in daylight
+    // the way real headlight beams do (the sun washes them out).
+    float lamp_level=dot(lamps,float3(.2126,.7152,.0722));lamps/=1+lamp_level/.35;
+    lamps*=1-.75*smoothstep(.02,.2,dot(sun_colour.rgb,float3(.2126,.7152,.0722)));
+    scattered+=lamps;
     float shadowed=1-beam_lit/max(beam_total,.000001);
     float beams=beam_lit*lerp(1-saturate(shape.x),1,smoothstep(.02,.3,shadowed));
     // Sun-height response: full beams at sunrise and sunset, a third at noon,

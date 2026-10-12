@@ -108,6 +108,11 @@ preset and steps between Performance and Ultra until the game holds about
 gameplay to turn it on or off (rebindable in AnyHelpers controls), or use the
 Photo mode switch under Preset. Opening any menu shows the UI again.
 
+**Local light beams** (headlights, torches, lamps) light the air in clear,
+thin beams that reach a little past each light's own range. Looking straight
+into a lamp is capped so it never whites out the screen, the glow rolls off
+softly, and beams fade in daylight the way real headlights do.
+
 No preset goes past Low volumetric fog or Medium base fog, because thick fog
 washes out the whole scene. More fog is available in Custom.
 
@@ -117,7 +122,7 @@ washes out the whole scene. More fog is available in Custom.
 | Performance | SSAO, shadows, fog blur, bloom, base fog, clouds and grass off | FXAA |
 | Low | Shadows on, low bloom/base fog; SSAO, fog blur and grass off | SMAA Medium |
 | Balanced | Native effects on; medium bloom/base fog, contact shadows Low | TAA High |
-| High | Native effects on; high bloom, medium base fog; subtle Vivid look, Medium detailed shading, bounce light and contact shadows, strong local beams | TAA High, sharpening Low |
+| High | Native effects on; high bloom, medium base fog; subtle Vivid look, Medium detailed shading, bounce light and contact shadows, local light beams | TAA High, sharpening Low |
 | Ultra | As High with a Vivid look, strong bloom and glare, High detailed shading, bounce light and contact shadows, bright sun, many clouds, very far objects and clear sun beams | TAA + jitter Ultra, sharpening Low |
 | Cinematic | As Ultra, with a strong teal & orange film grade, a medium vignette, stronger beams, extreme object distance, stronger sun beams, Medium depth of field and Low motion blur | TAA + jitter Ultra, sharpening Medium |
 | Natural | High, with Clean tone mapping, no colour look or vignette, softer bloom and glare, no volumetric fog | TAA High, sharpening Low |

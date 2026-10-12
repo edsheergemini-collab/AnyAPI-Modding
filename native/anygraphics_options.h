@@ -103,8 +103,8 @@ inline Values profile(const Values& current,int level){
  // Fog and beams are artistic strengths, not sample quality. High tiers add
  // samples and lights but keep fog light: no preset goes past Low volumetric
  // fog or Medium base fog, since thick fog washes the whole scene out.
- static constexpr float atmosphere[]={0,0,1,1,1,1},beams[]={0,1,2,3,4,4},local[]={0,1,2,3,4,4},quality[]={0,0,1,3,3,3};
- static constexpr float sun_intensity[]={1,1,1,1,1,1.5f},local_intensity[]={1,1,1,1,1.1f,1.3f},focus[]={1,1,1,1,2,2},clarity[]={1,1,1,1,0,0},reach[]={0,0,1,1,2,2},fog[]={0,.35f,.65f,.65f,.65f,.65f};
+ static constexpr float atmosphere[]={0,0,1,1,1,1},beams[]={0,1,2,3,4,4},local[]={0,1,2,2,3,3},quality[]={0,0,1,3,3,3};
+ static constexpr float sun_intensity[]={1,1,1,1,1,1.5f},local_intensity[]={1,1,1,1,1,1.2f},focus[]={1,1,1,1,2,2},clarity[]={1,1,1,1,0,0},reach[]={0,0,1,1,2,2},fog[]={0,.35f,.65f,.65f,.65f,.65f};
  v[Atmosphere]=atmosphere[tier];v[SunShafts]=beams[tier];v[LocalBeams]=local[tier];v[LightingQuality]=v[LocalBudget]=quality[tier];
  v[ShaftIntensity]=sun_intensity[tier];v[LocalIntensity]=local_intensity[tier];v[BeamFocus]=focus[tier];v[GroundFog]=0;
  v[ShaftClarity]=clarity[tier];v[BeamReach]=reach[tier];v[SunResponse]=1;v[TemporalLighting]=1;
