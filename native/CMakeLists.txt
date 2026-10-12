@@ -196,6 +196,9 @@ function(anyapi_version_resource target product)
   elseif(target STREQUAL "GpsPart")
     set(ANYAPI_VERSION_COMMA "1,0,0,0")
     set(ANYAPI_VERSION_TEXT "1.0.0")
+  elseif(target STREQUAL "ThirdPerson")
+    set(ANYAPI_VERSION_COMMA "0,1,0,0")
+    set(ANYAPI_VERSION_TEXT "0.1.0")
   elseif(target STREQUAL "AnyBalance")
     set(ANYAPI_VERSION_COMMA "1,2,0,0")
     set(ANYAPI_VERSION_TEXT "1.2.0")
@@ -357,6 +360,12 @@ anyapi_version_resource(GpsPart GpsPart)
 add_executable(gpspart_logic_test tests/gpspart_logic_test.cpp)
 target_compile_options(gpspart_logic_test PRIVATE /UNDEBUG /EHsc /utf-8)
 add_test(NAME gpspart_logic COMMAND gpspart_logic_test)
+
+# ThirdPerson: switches on the game's own third-person camera, through the experimental SDK.
+add_library(ThirdPerson SHARED thirdperson_mod.cpp)
+target_include_directories(ThirdPerson PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../sdk/experimental/include")
+target_compile_options(ThirdPerson PRIVATE /W3 /EHsc /utf-8)
+anyapi_version_resource(ThirdPerson ThirdPerson)
 
 # Public experimental SDK: compile all generated layouts and opt-in examples.
 add_executable(experimental_sdk_test tests/experimental_sdk_test.cpp)
