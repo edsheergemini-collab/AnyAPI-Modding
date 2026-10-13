@@ -25,6 +25,7 @@
 #include "anyapi_gpu_draw_v1.h"
 #include "anyapi_experimental.hpp"
 #include "gpspart_bindings.h"
+#include "route_cell.h"
 #include "gpspart_logic.h"
 #include "gpspart_help.h"
 #include "gpspart_mesh.h"
@@ -334,32 +335,34 @@ void install_hooks() {
     for (int attempt = 0; attempt < 180 && !g_stop; ++attempt) {
         if (attempt) Sleep(1000);
         if (!matching_build()) { if (attempt == 0) log(1, "game build does not match the SDK reference; GpsPart stays off"); return; }
-        void** add = hook_cell(bind::definitions_add_definitions);
-        void** tick_cell = hook_cell(bind::server_compass_tick);
-        void** get_cell = hook_cell(bind::server_compass_get_data_f64);
-        auto ctor = reinterpret_cast<file_ctor_t>(function(bind::definition_file_ctor));
-        auto dtor = reinterpret_cast<file_ctor_t>(function(bind::definition_file_dtor));
-        auto load = reinterpret_cast<file_load_t>(function(bind::definition_file_load));
-        auto vt = reinterpret_cast<transform_t>(function(bind::server_vehicle_get_transform));
-        auto ct = reinterpret_cast<transform_t>(function(bind::server_component_get_transform));
+        int roots = -1;                               // matches of the definition functions' route root (route_cell.h)
+        void** add = route::cell(bind::definitions_add_definitions, &roots);
+        void** tick_cell = route::cell(bind::server_compass_tick);
+        void** get_cell = route::cell(bind::server_compass_get_data_f64);
+        auto ctor = reinterpret_cast<file_ctor_t>(route::function(bind::definition_file_ctor));
+        auto dtor = reinterpret_cast<file_ctor_t>(route::function(bind::definition_file_dtor));
+        auto load = reinterpret_cast<file_load_t>(route::function(bind::definition_file_load));
+        auto vt = reinterpret_cast<transform_t>(route::function(bind::server_vehicle_get_transform));
+        auto ct = reinterpret_cast<transform_t>(route::function(bind::server_component_get_transform));
         auto sc = reinterpret_cast<string_ctor_t>(native(anymaker::sym::string_ctor_cstr_rva));
         if (!add || !tick_cell || !get_cell || !ctor || !dtor || !load || !vt || !ct || !sc) {
-            if (attempt == 179)
-                log(2, "could not locate the game functions (add=%d tick=%d get=%d file ctor=%d dtor=%d load=%d transforms=%d/%d string=%d)",
-                    !!add, !!tick_cell, !!get_cell, !!ctor, !!dtor, !!load, !!vt, !!ct, !!sc);
+            if (attempt == 20 || attempt == 179)   // once early, so a stuck start shows in the log
+                log(attempt == 179 ? 2 : 1, "%s the game functions (route root matches %d, add=%d tick=%d get=%d file ctor=%d dtor=%d load=%d transforms=%d/%d string=%d)",
+                    attempt == 179 ? "could not locate" : "still looking for", roots, !!add, !!tick_cell, !!get_cell, !!ctor, !!dtor, !!load, !!vt, !!ct, !!sc);
             continue;
         }
         if (!write_definition_file()) { log(2, "could not write the GPS Sensor definition file; GpsPart is off"); return; }
         g_file_ctor = ctor; g_file_dtor = dtor; g_file_load = load; g_vehicle_transform = vt; g_component_transform = ct; g_string_ctor = sc;
-        g_get_definition = reinterpret_cast<get_definition_t>(function(bind::definitions_get_by_id));
+        g_get_definition = reinterpret_cast<get_definition_t>(route::function(bind::definitions_get_by_id));
         if (!g_get_definition) log(1, "definition lookup not found; another mod re-adding definitions may add the GPS Sensor twice");
         bool ok = h_tick.install(tick_cell, (void*)&hk_tick) && h_get_f64.install(get_cell, (void*)&hk_get_f64) &&
                   h_add_definitions.install(add, (void*)&hk_add_definitions);
         if (!ok) { log(2, "a hook cell was already taken or not writable; GpsPart is off"); return; }
-        void** ui_cell = hook_cell(bind::client_microcontroller_update_ui);
+        void** ui_cell = route::cell(bind::client_microcontroller_update_ui);
         if (!ui_cell || !h_update_ui.install(ui_cell, (void*)&hk_update_ui)) log(1, "microcontroller help button unavailable (editor hook not found)");
         else if (!gpu) log(1, "microcontroller help button unavailable (anyapi.gpu_draw missing)");
         g_ready = true;
+        if (roots > 1) log(0, "the definition functions' route root matched %d times; all matches agreed", roots);
         log(0, "Ready after %d s. Load or start a world to add the GPS Sensor part (definition file %s).", attempt, g_json_path.c_str());
         return;
     }

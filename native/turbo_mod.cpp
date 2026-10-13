@@ -20,6 +20,7 @@
 #include "anyapi_services_v1.h"
 #include "anyapi_experimental.hpp"
 #include "turbo_bindings.h"
+#include "route_cell.h"
 #include "turbo_logic.h"
 #include "turbo_mesh.h"
 #include "turbo_sound.h"
@@ -927,7 +928,7 @@ void install_inline_valves() {
     static_assert(off::pump_node_b - off::pump_node_a == 0x220 - bind::kTwoNodeFloodFirst, "the two-node function reads nodes 0x40 apart");
     uint8_t* hits[4]{};
     size_t n = anymaker::find_gcl_functions(bind::kTwoNodeFloodCode, hits, 4);
-    void** cell = anymaker::experimental::hook_cell(bind::component_get_gas_flood_nodes);
+    void** cell = route::cell(bind::component_get_gas_flood_nodes);
     bool empty = cell && *cell && anymaker::readable(*cell, sizeof kEmptyFlood) && std::memcmp(*cell, kEmptyFlood, sizeof kEmptyFlood) == 0;
     if (n && empty) {
         g_two_node_flood = reinterpret_cast<flood_nodes_t>(hits[0]);
@@ -939,9 +940,9 @@ void install_inline_valves() {
 
 void install_sound() {
     using namespace anymaker::experimental;
-    void** cell = hook_cell(bind::client_centrifugal_tick);
-    void* entry = function(bind::client_centrifugal_tick);
-    g_world_transform = reinterpret_cast<world_transform_t>(function(bind::client_get_world_transform));
+    void** cell = route::cell(bind::client_centrifugal_tick);
+    void* entry = route::function(bind::client_centrifugal_tick);
+    g_world_transform = reinterpret_cast<world_transform_t>(route::function(bind::client_get_world_transform));
     g_play_voice = reinterpret_cast<play_voice_t>(native(audio::play_voice_rva));
     g_effect_append = reinterpret_cast<effect_append_t>(native(audio::append_rva));
     g_effect_place = reinterpret_cast<effect_place_t>(native(audio::set_position_velocity_rva));
@@ -964,29 +965,30 @@ void install_hooks() {
     for (int attempt = 0; attempt < 180 && !g_stop; ++attempt) {
         if (attempt) Sleep(1000);
         if (!matching_build()) { if (attempt == 0) log(1, "game build does not match the SDK reference; Turbo stays off"); return; }
-        void** add = hook_cell(bind::definitions_add_definitions);
-        void** create = hook_cell(bind::centrifugal_create);
-        void** destroy = hook_cell(bind::centrifugal_destroy);
-        void** tick = hook_cell(bind::centrifugal_tick);
-        void** get = hook_cell(bind::centrifugal_get_data_f64);
-        auto fctor = reinterpret_cast<self_fn_t>(function(bind::definition_file_ctor));
-        auto fdtor = reinterpret_cast<self_fn_t>(function(bind::definition_file_dtor));
-        auto fload = reinterpret_cast<file_load_t>(function(bind::definition_file_load));
-        auto cctor = reinterpret_cast<self_fn_t>(function(bind::gas_content_ctor));
-        auto cdtor = reinterpret_cast<self_fn_t>(function(bind::gas_content_dtor));
-        auto nctor = reinterpret_cast<self_fn_t>(function(bind::gas_node_ctor));
-        auto ndtor = reinterpret_cast<self_fn_t>(function(bind::gas_node_dtor));
-        auto ccreate = reinterpret_cast<content_create_t>(function(bind::gas_content_create));
-        auto cmodify = reinterpret_cast<content_modify_t>(function(bind::gas_content_modify));
-        auto cmove = reinterpret_cast<content_move_t>(function(bind::gas_content_move));
-        auto pset = reinterpret_cast<property_set_t>(function(bind::property_u8_set));
+        int roots = -1;                               // matches of the definition functions' route root (route_cell.h)
+        void** add = route::cell(bind::definitions_add_definitions, &roots);
+        void** create = route::cell(bind::centrifugal_create);
+        void** destroy = route::cell(bind::centrifugal_destroy);
+        void** tick = route::cell(bind::centrifugal_tick);
+        void** get = route::cell(bind::centrifugal_get_data_f64);
+        auto fctor = reinterpret_cast<self_fn_t>(route::function(bind::definition_file_ctor));
+        auto fdtor = reinterpret_cast<self_fn_t>(route::function(bind::definition_file_dtor));
+        auto fload = reinterpret_cast<file_load_t>(route::function(bind::definition_file_load));
+        auto cctor = reinterpret_cast<self_fn_t>(route::function(bind::gas_content_ctor));
+        auto cdtor = reinterpret_cast<self_fn_t>(route::function(bind::gas_content_dtor));
+        auto nctor = reinterpret_cast<self_fn_t>(route::function(bind::gas_node_ctor));
+        auto ndtor = reinterpret_cast<self_fn_t>(route::function(bind::gas_node_dtor));
+        auto ccreate = reinterpret_cast<content_create_t>(route::function(bind::gas_content_create));
+        auto cmodify = reinterpret_cast<content_modify_t>(route::function(bind::gas_content_modify));
+        auto cmove = reinterpret_cast<content_move_t>(route::function(bind::gas_content_move));
+        auto pset = reinterpret_cast<property_set_t>(route::function(bind::property_u8_set));
         auto sc = reinterpret_cast<string_ctor_t>(native(anymaker::sym::string_ctor_cstr_rva));
         auto dt = static_cast<const double*>(global(bind::server_delta_time));
         bool core = add && create && destroy && tick && get && fctor && fdtor && fload && cctor && cdtor && nctor && ndtor && ccreate && cmodify && cmove && pset && sc;
         if (!core) {
-            if (attempt == 179)
-                log(2, "could not locate the game functions (add=%d create=%d destroy=%d tick=%d get=%d file=%d/%d/%d content=%d/%d/%d/%d/%d node=%d/%d property=%d string=%d)",
-                    !!add, !!create, !!destroy, !!tick, !!get, !!fctor, !!fdtor, !!fload, !!cctor, !!cdtor, !!ccreate, !!cmodify, !!cmove, !!nctor, !!ndtor, !!pset, !!sc);
+            if (attempt == 20 || attempt == 179)   // once early, so a stuck start shows in the log
+                log(attempt == 179 ? 2 : 1, "%s the game functions (route root matches %d, add=%d create=%d destroy=%d tick=%d get=%d file=%d/%d/%d content=%d/%d/%d/%d/%d node=%d/%d property=%d string=%d)",
+                    attempt == 179 ? "could not locate" : "still looking for", roots, !!add, !!create, !!destroy, !!tick, !!get, !!fctor, !!fdtor, !!fload, !!cctor, !!cdtor, !!ccreate, !!cmodify, !!cmove, !!nctor, !!ndtor, !!pset, !!sc);
             continue;
         }
         if (!destroy_slot_matches(*destroy)) return;
@@ -994,27 +996,27 @@ void install_hooks() {
         g_content_ctor = cctor; g_content_dtor = cdtor; g_node_ctor = nctor; g_node_dtor = ndtor;
         g_content_create = ccreate; g_content_modify = cmodify; g_content_move = cmove; g_property_set = pset; g_string_ctor = sc;
         g_delta_time = dt && anymaker::readable(dt, 8) ? dt : nullptr;
-        void** tooltip = hook_cell(bind::centrifugal_build_tooltip);
-        g_component_tooltip = reinterpret_cast<build_tooltip_t>(function(bind::component_build_tooltip));
-        g_units_flow = reinterpret_cast<units_t>(function(bind::units_flow));
-        g_units_frequency = reinterpret_cast<units_t>(function(bind::units_frequency));
-        g_units_pressure = reinterpret_cast<units_t>(function(bind::units_pressure));
-        g_to_pascals = reinterpret_cast<to_pascals_t>(function(bind::pressure_to_pascals));
+        void** tooltip = route::cell(bind::centrifugal_build_tooltip);
+        g_component_tooltip = reinterpret_cast<build_tooltip_t>(route::function(bind::component_build_tooltip));
+        g_units_flow = reinterpret_cast<units_t>(route::function(bind::units_flow));
+        g_units_frequency = reinterpret_cast<units_t>(route::function(bind::units_frequency));
+        g_units_pressure = reinterpret_cast<units_t>(route::function(bind::units_pressure));
+        g_to_pascals = reinterpret_cast<to_pascals_t>(route::function(bind::pressure_to_pascals));
         g_string_dtor = reinterpret_cast<self_fn_t>(native(anymaker::sym::string_dtor_rva));
         bool tooltip_ok = tooltip && g_component_tooltip && g_units_flow && g_units_frequency && g_units_pressure && g_to_pascals && g_string_dtor;
-        g_create_node_bound = reinterpret_cast<create_node_t>(function(bind::gas_container_create_node));
-        g_get_definition = reinterpret_cast<get_definition_t>(function(bind::definitions_get_by_id));
+        g_create_node_bound = reinterpret_cast<create_node_t>(route::function(bind::gas_container_create_node));
+        g_get_definition = reinterpret_cast<get_definition_t>(route::function(bind::definitions_get_by_id));
         if (!g_get_definition) log(1, "definition lookup not found; Turbo may add its parts twice if another mod re-adds definitions");
         if (!write_definition_file()) { log(2, "could not write the Turbo definitions file; Turbo is off"); return; }
         bool ok = h_destroy.install(destroy, (void*)&hk_destroy) && h_create.install(create, (void*)&hk_create) &&
                   h_tick.install(tick, (void*)&hk_tick) && h_get_f64.install(get, (void*)&hk_get_f64) &&
                   h_add_definitions.install(add, (void*)&hk_add_definitions);
         if (!ok) { log(2, "a hook cell was already taken or not writable; Turbo is off"); return; }
-        void** properties = hook_cell(bind::centrifugal_get_properties);
+        void** properties = route::cell(bind::centrifugal_get_properties);
         if (!properties || !h_properties.install(properties, (void*)&hk_properties))
             log(1, "blow-off valve spring setting unavailable (Properties Tool hook not found); it stays at %.0f kPa", kBlowOffDefaultKpa);
-        void** parse = hook_cell(bind::centrifugal_parse_save_data);
-        g_parse_f64 = reinterpret_cast<parse_f64_t>(function(bind::parser_parse_f64));
+        void** parse = route::cell(bind::centrifugal_parse_save_data);
+        g_parse_f64 = reinterpret_cast<parse_f64_t>(route::function(bind::parser_parse_f64));
         if (!parse || !g_parse_f64 || !g_string_dtor || !h_parse_save.install(parse, (void*)&hk_parse_save))
             log(1, "blow-off valve settings won't be saved (save hook %d, parse %d)", !!parse, !!g_parse_f64);
         if (!tooltip_ok || !h_tooltip.install(tooltip, (void*)&hk_tooltip))
@@ -1023,6 +1025,7 @@ void install_hooks() {
         install_inline_valves();
         install_sound();
         g_ready = true;
+        if (roots > 1) log(0, "the definition functions' route root matched %d times; all matches agreed", roots);
         log(0, "Ready after %d s (server tick %s). Load or start a world to add the Turbo parts (definitions %s).", attempt,
             g_delta_time ? "found" : "not found, assuming 60 Hz", g_json_path.c_str());
         return;
