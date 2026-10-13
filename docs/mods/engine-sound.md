@@ -42,6 +42,16 @@ Custom so you can tune from it. On Custom, drag its sliders:
 Turbo engines also play a blow-off hiss when you lift off after building boost. At neutral settings Custom
 sounds exactly like stock sound 1.
 
+Every engine type except Stock 1-3 also behaves like a running machine rather than a pitched loop (0.3.0):
+
+- **Start-up flare.** The revs blip above idle when the engine catches, then settle. Diesels blip less.
+- **Rev limiter.** Holding full throttle at the top of the rev range bounces off the limiter in quick fuel cuts,
+  with the odd pop on tunes that crackle.
+- **Rev inertia.** Revs climb quicker than they fall. **Rev smoothing** makes that inertia heavier.
+- **Uneven firing.** A small wobble in pitch and loudness that grows with load, so the note is never perfectly steady.
+- **Overrun.** Coasting at high revs with the throttle shut brings the deeper body layer forward.
+- **Crackle bursts.** Lift-off crackle comes in bursts of two to seven pops with short gaps, and a cold start pops once.
+
 ## How it works
 
 The game plays engines from recorded loops and changes their pitch and volume with the engine's speed and
@@ -53,6 +63,11 @@ The choice is stored in the engine's own sound setting. The host keeps it, saves
 it to every player, so everyone with EngineSound hears the same engine. All twelve Custom sliders are packed
 into that same number. On the host, EngineSound widens the setting's allowed range so these values are
 accepted. Crackle timing is random per player, so pops land at slightly different moments on each machine.
+
+A game sound voice keeps the recording it started with, even when it is later told to play another one. So
+whenever an engine's sound changes while a voice is playing (for example a vehicle spawned from a save, which
+starts on the stock sound before its saved choice arrives), EngineSound stops that voice and lets it start
+again with the right recording. Before 0.3.0 the stock recording could keep playing underneath the new sound.
 
 ## Requirements and limits
 

@@ -49,4 +49,22 @@ int main(){
  assert(smooth(0,1,0,.016)==1);double v=0;for(int i=0;i<600;++i)v=smooth(v,1,.2,.016);assert(std::abs(v-1)<1e-6);
  assert(smooth(.3,1,.2,0)==1&&smooth(NAN,1,.2,.016)==1);
  assert(clamp_speed(NAN)==1&&clamp_speed(100)==4&&clamp_volume(-1)==0&&clamp_volume(NAN)==0);
+ // Realism layer: off for stock types (neutral Custom stays stock), on for the others.
+ assert(!realism(nn)&&startup_flare(nn,.2)==1&&rev_limiter(nn,1,1,.01).cut==0&&firing_wobble(nn,1,.3).pitch==1&&overrun_body_gain(nn,1,0)==1&&crackle_burst_size(nn,.5)==0);
+ assert(smoothing_seconds(nn,false)==0);
+ Params i6=neutral();i6.v[kType]=4;assert(realism(i6)&&smoothing_seconds(i6,true)<smoothing_seconds(i6,false));
+ i6.v[kSmoothing]=1;assert(smoothing_seconds(i6,true)>.1&&smoothing_seconds(i6,false)>smoothing_seconds(i6,true));
+ // Start-up flare rises fast, peaks near 1+flare and settles back to 1.
+ double peak=1;for(double t=0;t<2.5;t+=.01){double f=startup_flare(v8,t);assert(f>=1&&f<=1+kTypes[6].flare+1e-9);peak=std::max(peak,f);}
+ assert(peak>1+.8*kTypes[6].flare&&std::abs(startup_flare(v8,2.4)-1)<.01&&startup_flare(v8,-1)==1&&startup_flare(v8,NAN)==1);
+ assert(startup_flare(ev,.2)==1);
+ // Rev limiter only bites at the top under load, and cuts in periodic bursts.
+ assert(rev_limiter(v8,.9,1,.01).cut==0&&rev_limiter(v8,1,.2,.01).cut==0);
+ int cuts=0;for(double t=0;t<1;t+=.001){auto l=rev_limiter(v8,1,1,t);assert(l.volume>=.5-1e-9&&l.volume<=1&&l.pitch>=.96-1e-9);cuts+=l.cut>.5;}
+ assert(cuts>50&&cuts<500&&rev_limiter(ev,1,1,.01).cut==0);
+ // Wobble is small and bounded; overrun lifts the body only when coasting at revs.
+ for(double t=0;t<2;t+=.01){auto w=firing_wobble(v8,1,t);assert(std::abs(w.pitch-1)<.0061&&std::abs(w.volume-1)<.061);}
+ assert(overrun_body_gain(v8,1,0)>1.1&&overrun_body_gain(v8,1,1)==1&&overrun_body_gain(v8,0,0)==1);
+ // Crackle bursts grow with the level.
+ Params cr=v8;for(int lv=1;lv<4;++lv){cr.v[kCrackle]=uint8_t(lv);int a=crackle_burst_size(cr,0),b=crackle_burst_size(cr,.999);assert(a==1+lv&&b==1+lv+lv&&b>=a);}
  return 0;}
