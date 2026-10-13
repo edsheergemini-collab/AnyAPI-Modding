@@ -201,7 +201,7 @@ inline void render(Synth& s, const Input& in, int16_t* out, int count) {
         v += 0.05 * clamp01(rpm01 * 1.5) * s.whirr.run(s.noise());
         s.soft += (v - s.soft) * (1.0 - std::exp(-dt * two_pi * (1100.0 + 9000.0 * (1.0 - idle))));
         v = s.soft;
-        v *= c.gain;
+        v *= c.gain * (1.0 + 0.12 * idle);   // the idle a touch louder; the rev untouched
         v = std::isfinite(v) ? v : 0;
         s.dc_y = v - s.dc_x + 0.9967 * s.dc_y;   // ~25 Hz high-pass: no DC from the one-sided pulses
         s.dc_x = v;
