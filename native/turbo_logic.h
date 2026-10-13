@@ -228,7 +228,9 @@ inline Step step(State& st, const Spec& s, const Inputs& in) {
     for (int i = 0; i < kNodeCount; ++i) p[i] = std::max(0.0, finite_or(in.pressure[i], 1.0));
     // Hot side: exhaust passes the turbine in proportion to the pressure drop across it.
     out.turbine_move = capped(s.turbine_coeff * (p[kHotIn] - p[kHotOut]) * dt, in.volume[kHotIn], in.volume[kHotOut]);
-    double exhaust_lps = std::abs(out.turbine_move) / dt;
+    // Only exhaust going the right way drives the turbine: gas flowing back out of a pressurised hot side after the
+    // engine stops must not spool it up.
+    double exhaust_lps = std::max(0.0, out.turbine_move) / dt;
     double k = std::min(1.0, dt / 0.15);
     st.exhaust_flow += (exhaust_lps - st.exhaust_flow) * k;
     // Shaft: the spool chases the exhaust flow, slowly (turbo lag), faster when it falls.

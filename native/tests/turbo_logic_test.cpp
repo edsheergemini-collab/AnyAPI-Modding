@@ -146,6 +146,12 @@ int main() {
         auto without = lift(false), with = lift(true);
         assert(without.first && !with.first && without.second < with.second - 0.1 && st_ok(with.second));
     }
+    // Exhaust flowing back out of the hot side (engine just stopped) does not spool the turbo.
+    { State st; Inputs in; in.dt = 1.0 / 60;
+      in.pressure[kHotIn] = 1; in.volume[kHotIn] = 2; in.pressure[kHotOut] = 4; in.volume[kHotOut] = 8;
+      in.pressure[kColdIn] = 1; in.volume[kColdIn] = 2; in.pressure[kColdOut] = 1; in.volume[kColdOut] = 2;
+      for (int i = 0; i < 120; ++i) { Step o = step(st, spec(3), in); assert(o.turbine_move <= 0); }
+      assert(st.spool == 0 && st.exhaust_flow == 0); }
     // Garbage input never produces NaN.
     { State st; Inputs in; for (auto& p : in.pressure) p = NAN; in.dt = NAN; Step o = step(st, spec(4), in); assert(o.turbine_move == 0 && o.compressor_move == 0);
       in.dt = 1.0 / 60; o = step(st, spec(4), in); assert(std::isfinite(o.turbine_move) && std::isfinite(o.compressor_move) && std::isfinite(st.spool)); }
