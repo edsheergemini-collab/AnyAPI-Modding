@@ -12,7 +12,8 @@
 // offset points forward the distance is negated; if the game does not move the camera at all, the mod moves it
 // back along the view axis itself. Both cases are logged.
 //
-// In vehicles a steady chase camera (level horizon, smoothed heading and pitch) replaces the seat-locked view.
+// A steady chase camera (level horizon, smoothed heading and pitch) is used on foot and replaces the seat-locked
+// view in vehicles.
 //
 // Controls: F5 toggles (rebindable in Controls under ThirdPerson when AnyHelpers is installed); Alt + mouse wheel
 // changes the follow distance while in third person. Settings: start in third person, follow distance.
@@ -63,7 +64,7 @@ uint64_t g_tokens[3], g_action, g_settings_revision = ~0ull;
 std::atomic<bool> g_ready{false}, g_stop{false};
 std::atomic<bool> g_want{false};                    // third person requested
 std::atomic<double> g_target{kDefaultDistance};     // follow distance in metres
-std::atomic<bool> g_steady{true};                   // level, smoothed chase camera while seated
+std::atomic<bool> g_steady{true};                   // level, smoothed chase camera
 std::atomic<ULONGLONG> g_toast_until{0};
 std::mutex g_input_mutex;
 bool g_key_held;
@@ -143,10 +144,11 @@ void cross(const double* a, const double* b, double* o) { o[0] = a[1] * b[2] - a
 bool normalize(double* v) { double l = std::sqrt(dot(v, v)); if (!(l > 1e-9)) return false; for (int i = 0; i < 3; ++i) v[i] /= l; return true; }
 double det(const double* m) { double c[3]; cross(basis(m, 1), basis(m, 2), c); return dot(basis(m, 0), c); }
 
-// ------------------------------------------------------------------ steady vehicle camera
+// ------------------------------------------------------------------ steady camera
 // Seated, the game's view turns with the vehicle, so bumps, hills and crashes throw the camera around. The steady
 // camera keeps the horizon level, follows the view's heading and pitch through a smoothing filter that gets much
-// slower when the vehicle tilts or tumbles, and sits a little higher than the head.
+// slower when the vehicle tilts or tumbles, and sits a little higher than the head when seated. On foot the same
+// filter gives the chase camera the same feel.
 constexpr double kWorldUp[3] = {0, 1, 0};
 double g_up_world[3] = {0, 1, 0};   // the camera's "up" last frame, followed continuously through rolls
 int g_up_axis_logged = -1, g_up_logs;
@@ -283,7 +285,7 @@ void hk_transform(double* ret, uint8_t* scene) {
     }
     if (g_mode == Mode::Unknown || !g_steady) { g_steady_active = false; return; }
     double seated = seated_factor(scene);
-    if (g_seat_logs < 6 && ((seated > 0.5) != (g_seat_logs % 2 == 1))) { ++g_seat_logs; log(0, "seated factor %.2f: %s camera", seated, seated > 0.5 && g_steady ? "steady vehicle" : "normal"); }
+    if (g_seat_logs < 6 && ((seated > 0.5) != (g_seat_logs % 2 == 1))) { ++g_seat_logs; log(0, "seated factor %.2f: %s", seated, seated > 0.5 ? "in a vehicle" : "on foot"); }
     // The head view (distance 0) and the game's own back direction, for learning the up axis and the steady camera.
     double head[12], probe[12], back[3];
     write_third_person(scene, 0.0);
@@ -296,7 +298,6 @@ void hk_transform(double* ret, uint8_t* scene) {
     }
     write_third_person(scene, g_mode == Mode::Own ? 0.0 : g_sign * dist);
     if (!normalize(back)) return;
-    if (seated < 0.5) { g_steady_active = false; return; }
     steady_camera(ret, head, back, dist, seated);
 }
 
@@ -387,7 +388,7 @@ void install_hooks() {
         void** cell = hook_cell(bind::client_scene_get_camera_transform);
         if (!cell) { if (attempt == 179) log(2, "could not locate client_scene.get_camera_transform; ThirdPerson is off"); continue; }
         if (!(g_peer_actor = reinterpret_cast<peer_actor_t>(function(bind::actor_container_get_peer_actor))))
-            log(1, "local player lookup not located: the steady vehicle camera is off");
+            log(1, "local player lookup not located: the steady camera treats vehicles like walking");
         if (!h_transform.install(cell, (void*)&hk_transform)) { log(2, "the camera hook cell was already taken or not writable; ThirdPerson is off"); return; }
         if (auto head = static_cast<bool*>(global(bind::g_render_first_person_head))) {
             std::lock_guard lock(g_cam_mutex);
@@ -429,7 +430,7 @@ extern "C" __declspec(dllexport) void AnyAPI_ModReady() {
         d.default_number = kDefaultDistance; d.minimum = kMinDistance; d.maximum = kMaxDistance; d.step = kWheelStep;
         g_tokens[1] = settings->register_setting(&d);
         d = AnyModSettingV1{}; d.mod_id = kModId; d.mod_name = "ThirdPerson";
-        d.setting_id = "steady_vehicle_camera"; d.label = "Steady camera in vehicles"; d.kind = ANY_SETTING_BOOL; d.order = 2;
+        d.setting_id = "steady_vehicle_camera"; d.label = "Steady camera"; d.kind = ANY_SETTING_BOOL; d.order = 2;
         d.default_number = 1;
         d.description = "Keeps the horizon level and smooths bumps, hills and crashes while seated. Off follows the seat exactly.";
         g_tokens[2] = settings->register_setting(&d);

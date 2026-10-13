@@ -20,7 +20,7 @@ With [AnyHelpers](helpers.md) installed, F5 can be rebound in **Controls → Thi
 | --- | --- | --- |
 | Start in third person | Off | Use third person from the moment the game starts |
 | Follow distance (m) | 4.0 | The distance used when you switch to third person. Alt + wheel changes it until you next apply settings |
-| Steady camera in vehicles | On | While seated, keeps the horizon level and smooths bumps, hills and crashes instead of following the seat exactly |
+| Steady camera | On | Smooths the chase camera on foot and in vehicles; while seated it also keeps the horizon level through bumps, hills and crashes |
 
 Without AnyHelpers the mod still works with F5 and a 4 m default distance.
 
@@ -37,13 +37,14 @@ For the first frames in third person the mod checks the camera's offset against 
 game's offset points forward it flips the distance; if the game does not move the camera at all, the mod moves it
 back along the view itself. Both cases are written to `anymaker_modding.log`.
 
-## In vehicles
+## Steady camera
 
 Seated, the game's view turns with the vehicle, so in third person every bump, hill and crash used to throw the
-camera around. With **Steady camera in vehicles** on (the default), ThirdPerson builds a chase camera instead: it
-follows where you look through a short smoothing filter, keeps the horizon level, sits a little higher than your
-head, and gets much calmer while the vehicle is tilted or tumbling. Looking around with the mouse in a vehicle
-therefore has a slight, deliberate lag. On foot nothing changes.
+camera around. With **Steady camera** on (the default), ThirdPerson builds a chase camera instead: it follows
+where you look through a short smoothing filter and keeps the horizon level. In vehicles it also sits a little
+higher than your head and gets much calmer while the vehicle is tilted or tumbling. On foot the same smoothing
+applies, so looking around with the mouse in third person has a slight, deliberate lag. Turn the setting off for
+the game's exact view.
 
 ## Known limits
 
