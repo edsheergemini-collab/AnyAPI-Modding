@@ -56,6 +56,17 @@ Two companion parts, in the gas parts with the turbos:
 
 Both use the gas vent's look for now. The turbo's own `surge` output is 1 while it surges.
 
+## Sounds
+
+Turbos and blow-off valves have their own sounds in place of the impeller hum, made by the mod as it plays:
+
+- **Spool whistle**: a whine that rises with turbine speed, plus intake hiss. Bigger turbos whistle lower.
+- **Surge** (no blow-off valve, throttle lifted): the "stu-stu-stu" flutter as boost pushes back through the
+  compressor.
+- **Blow-off whoosh**: a burst of air when the valve opens, lasting while it vents.
+
+The wastegate is silent. Sounds follow the vehicle volume slider and are heard by every player near the part.
+
 ## Tooltip
 
 Looking at a turbo shows its intake flow, turbine speed and boost (the pressure it adds over the intake), in the
@@ -97,6 +108,10 @@ Wire them from a data port, a data link or a microcontroller. Pressures use the 
 - Each tick the turbo lets exhaust through its hot side in proportion to the pressure drop, spools from that
   flow with its size's lag, and runs its compressor with a head set by the spool (full spool gives the engine's
   full boost).
+- Sounds: the server packs each turbo's spool and surge (and each blow-off valve's venting) into the impeller's
+  own replicated speed value. The client impeller tick, which only plays the hum, is hooked for the mod's parts:
+  it synthesizes 48 kHz audio ([`turbo_sound.h`](../../native/turbo_sound.h)) and streams it into a positional
+  voice effect, the way the game plays voice chat. If the hooks are not found, the parts keep the hum.
 - The hot side's gas is not saved; it refills from the pipes after loading. Saves that contain a turbo need
   Turbo installed to load it.
 

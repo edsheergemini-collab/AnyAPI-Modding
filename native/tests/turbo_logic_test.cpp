@@ -1,5 +1,6 @@
 #include "../turbo_logic.h"
 #include "../turbo_mesh.h"
+#include "../turbo_sound.h"
 #include <cassert>
 #include <cmath>
 #include <cstring>
@@ -143,6 +144,37 @@ int main() {
         // Cold outlet stub lands in the top cell on the +z face; hot inlet stub in the bottom cell on -z.
         assert(int(std::lround(v[3].pos[1] / kCell)) == port(n, kColdOut).y && near(v[3].pos[2], (n - 0.5) * kCell, 1e-5));
         assert(int(std::lround(v[7].pos[1] / kCell)) == port(n, kHotIn).y && near(v[7].pos[2], -0.5 * kCell, 1e-5));
+    }
+    // Sounds: the replicated factor survives the one-byte trip, and every voice renders finite, audible audio.
+    {
+        auto byte = [](double f) { return std::round(f * 255.0) / 255.0; };
+        for (int i = 0; i <= 20; ++i) {
+            double spool = i / 20.0, got; bool surging;
+            decode_turbo_factor(byte(encode_turbo_factor(spool, false)), got, surging);
+            assert(!surging && near(got, spool, 0.01));
+            decode_turbo_factor(byte(encode_turbo_factor(spool, true)), got, surging);
+            assert(surging && near(got, spool, 0.01));
+            bool open; double level;
+            decode_blow_off_factor(byte(encode_blow_off_factor(true, spool)), open, level);
+            assert(open && near(level, spool, 0.01));
+            decode_blow_off_factor(byte(encode_blow_off_factor(false, spool)), open, level);
+            assert(!open && level == 0);
+        }
+        auto peak = [](Synth& s, double level, bool flag, int samples) {
+            std::vector<int16_t> pcm(static_cast<size_t>(samples));
+            render(s, level, flag, pcm.data(), samples);
+            int p = 0; for (int16_t x : pcm) p = std::max(p, std::abs(int(x)));
+            return p;
+        };
+        Synth idle; assert(peak(idle, 0, false, 4800) == 0);
+        Synth whistle; whistle.size = 3; peak(whistle, 1, false, 24000); int w = peak(whistle, 1, false, 4800);
+        assert(w > 3000 && w <= 32767);
+        Synth surge; surge.size = 3; peak(surge, 0.6, false, 24000); int calm = peak(surge, 0.6, false, 4800), stu = peak(surge, 0.6, true, 9600);
+        assert(stu > calm);
+        Synth bov; bov.voice = Voice::kBlowOff; assert(peak(bov, 0, false, 4800) == 0);
+        int whoosh = peak(bov, 1, true, 4800); assert(whoosh > 3000);
+        peak(bov, 0, false, 3 * 48000); assert(peak(bov, 0, false, 4800) < 50);   // the tail dies away
+        Synth wild; peak(wild, std::nan(""), true, 4800); assert(peak(wild, 0.5, false, 4800) <= 32767);
     }
     return 0;
 }

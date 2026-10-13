@@ -22,6 +22,7 @@
 #include "turbo_bindings.h"
 #include "turbo_logic.h"
 #include "turbo_mesh.h"
+#include "turbo_sound.h"
 #include <atomic>
 #include <cstdarg>
 #include <cstdio>
@@ -66,7 +67,10 @@ constexpr ptrdiff_t content_capacity = 40;           // m_capacity (f64, litres)
 constexpr ptrdiff_t content_temperature = 48;        // m_temperature (f64, C)
 constexpr ptrdiff_t node_component = 0;              // vehicle_gas_node.m_component
 constexpr ptrdiff_t node_island = 48;                // vehicle_gas_node.m_island (ptr<vehicle_gas_island>; its m_nodes vector at +0)
-constexpr ptrdiff_t node_node_index = 20;            // vehicle_gas_node.m_node_index (s32; -1 when not found)
+constexpr ptrdiff_t node_node_index = 20;
+constexpr ptrdiff_t client_definition = 176;         // client_scene.vehicle_component.m_definition
+constexpr ptrdiff_t client_factor_speed = 0xe0 + 8;  // client gas_pump_centrifugal.m_factor_speed's value (f64)
+constexpr ptrdiff_t mat34_t = 72;                    // mat34.t (vec3)            // vehicle_gas_node.m_node_index (s32; -1 when not found)
 constexpr size_t content_size = 56, node_size = 64, definition_file_size = 40;
 constexpr int container_create_node_slot = 3, container_destroy_node_slot = 5;   // vehicle_gas_node.container method table
 }  // namespace off
@@ -137,9 +141,7 @@ double now_seconds() {
 // What a gas_pump_centrifugal component is: 2-5 a turbo of that size, kKindBlowOff / kKindWastegate a valve,
 // 0 a stock impeller.
 constexpr int kKindBlowOff = 10, kKindWastegate = 11;
-int part_kind(const void* component) {
-    if (!component || !anymaker::readable(static_cast<const uint8_t*>(component) + off::component_definition, 8)) return 0;
-    const void* definition = at<const void*>(component, off::component_definition);
+int kind_of_definition(const void* definition) {
     if (!definition) return 0;
     auto found = g_definition_size.find(definition);
     if (found != g_definition_size.end()) return found->second;
@@ -155,6 +157,10 @@ int part_kind(const void* component) {
     }
     g_definition_size[definition] = n;
     return n;
+}
+int part_kind(const void* component) {
+    if (!component || !anymaker::readable(static_cast<const uint8_t*>(component) + off::component_definition, 8)) return 0;
+    return kind_of_definition(at<const void*>(component, off::component_definition));
 }
 int turbo_size(const void* component) { int k = part_kind(component); return k >= kMinSize && k <= kMaxSize ? k : 0; }
 
@@ -345,6 +351,8 @@ void tick_valve(void* self, int kind) {
     at<double>(self, off::pump_pressure) = 0;
     at<double>(self, off::pump_display_power) = 0;
     at<double>(self, off::pump_flow) = litres;
+    double sound = kind == kKindBlowOff ? encode_blow_off_factor(v.state.slots[kValveOpen] > 0.5, v.state.flow / 60.0) : 0.0;
+    g_property_set(static_cast<uint8_t*>(self) + off::pump_factor_speed, &sound);
 }
 
 void hk_tick(void* self, void* vehicle, void* scene) {
@@ -387,7 +395,7 @@ void hk_tick(void* self, void* vehicle, void* scene) {
     at<double>(self, off::pump_display_power) = o.power;
     at<double>(self, off::pump_flow) = o.compressor_move;
     t.boost = std::max(0.0, in.pressure[kColdOut] - in.pressure[kColdIn]);
-    double sound = t.state.spool;
+    double sound = encode_turbo_factor(t.state.spool, t.state.surging);   // the clients' turbo sound (turbo_sound.h)
     g_property_set(static_cast<uint8_t*>(self) + off::pump_factor_speed, &sound);
     static std::atomic<int> event_logs{60};
     if (t.state.surging != t.was_surging || in.bov_venting != t.was_venting) {
@@ -630,6 +638,131 @@ void hk_add_definitions(void* container, const void* file) {
     if (logs.fetch_sub(1) > 0) log(ok ? 0 : 2, ok ? "Turbo parts added to the game's parts (%s)" : "could not load the Turbo definitions from %s", g_json_path.c_str());
 }
 
+// ------------------------------------------------------------------------------------- sounds (client)
+// Each turbo and blow-off valve streams its own synthesized sound (turbo_sound.h) into a positional voice effect,
+// the way the game plays voice chat, in place of the stock impeller hum. Main thread only.
+namespace audio {
+constexpr uint32_t play_voice_rva = 0x1409e0;       // (effect_3d) application.audio.play_voice (s32 group, vec3, vec3, f64)
+constexpr uint32_t append_rva = 0x141160;           // effect_3d.append_audio_data (takes the buffer's memory)
+constexpr uint32_t set_position_velocity_rva = 0x141140;
+constexpr uint32_t stop_rva = 0x141110;
+constexpr uint32_t reset_rva = 0x141050;            // effect_3d.reset (releases the handle)
+constexpr uint32_t buffer_reset_rva = 0x41c40;      // binary.buffer.reset (allocates with the game's allocator)
+constexpr int32_t kGroupVehicle = 4;                // e_audio_group.vehicle: follows the vehicle volume slider
+constexpr double kRange = 80.0;                     // metres
+constexpr double kLead = 0.08;                      // seconds of sound queued ahead
+}  // namespace audio
+struct GameBuffer { void* data; int32_t size; uint32_t pad; };
+static_assert(sizeof(GameBuffer) == 16, "binary.buffer");
+using play_voice_t = void (*)(void** effect, const int32_t* group, const double* position, const double* velocity, const double* range);
+using effect_fn_t = void (*)(void** effect);
+using effect_append_t = void (*)(void** effect, GameBuffer* buffer);
+using effect_place_t = void (*)(void** effect, const double* position, const double* velocity);
+using buffer_reset_t = void (*)(GameBuffer* buffer, const int32_t* size);
+using world_transform_t = void (*)(double* ret, const void* component);
+using client_tick_t = void (*)(void* self, void* network, void* vehicle, void* scene, const double* dt);
+play_voice_t g_play_voice;
+effect_fn_t g_effect_stop, g_effect_reset;
+effect_append_t g_effect_append;
+effect_place_t g_effect_place;
+buffer_reset_t g_buffer_reset;
+world_transform_t g_world_transform;
+anymaker::cell_hook h_client_tick;
+
+struct ClientVoice {
+    void* effect = nullptr;                         // application.audio.effect_3d (a handle)
+    Synth synth;
+    double start = 0, last_tick = 0, retry_at = 0;
+    long long written = 0;                          // samples queued since start
+    double position[3]{}, velocity[3]{};
+    bool placed = false;
+};
+std::unordered_map<const void*, ClientVoice> g_voices;   // keyed by client component
+std::vector<int16_t> g_pcm;
+double g_last_sweep = 0;
+
+void release_voice(ClientVoice& v) {
+    if (!v.effect) return;
+    g_effect_stop(&v.effect);
+    g_effect_reset(&v.effect);
+    v.effect = nullptr;
+}
+
+void stream_sound(void* self, int kind, const double* dt) {
+    double now = now_seconds();
+    ClientVoice& v = g_voices[self];
+    v.last_tick = now;
+    double factor = at<double>(self, off::client_factor_speed), level = 0;
+    bool flag = false;
+    if (kind == kKindBlowOff) {
+        v.synth.voice = Voice::kBlowOff;
+        decode_blow_off_factor(factor, flag, level);
+    } else {
+        v.synth.voice = Voice::kTurbo;
+        v.synth.size = kind;
+        decode_turbo_factor(factor, level, flag);
+    }
+    double matrix[12]{};
+    g_world_transform(matrix, self);
+    const double* p = matrix + off::mat34_t / 8;
+    double step = dt && std::isfinite(*dt) && *dt > 1e-4 ? *dt : 1.0 / 60.0;
+    if (std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2])) {
+        for (int i = 0; i < 3; ++i) {
+            double vel = v.placed ? (p[i] - v.position[i]) / step : 0.0;
+            vel = std::max(-150.0, std::min(150.0, vel));
+            v.velocity[i] += (vel - v.velocity[i]) * 0.2;   // frame-to-frame jitter would wobble the pitch
+            v.position[i] = p[i];
+        }
+        v.placed = true;
+    }
+    if (!v.effect) {
+        if (now < v.retry_at || !v.placed) return;
+        int32_t group = audio::kGroupVehicle; double range = audio::kRange;
+        g_play_voice(&v.effect, &group, v.position, v.velocity, &range);
+        if (!v.effect) {
+            v.retry_at = now + 1.0;
+            static std::atomic<int> logs{3};
+            if (logs.fetch_sub(1) > 0) log(1, "the game gave no voice for a turbo sound; retrying");
+            return;
+        }
+        v.start = now; v.written = 0;
+    }
+    g_effect_place(&v.effect, v.position, v.velocity);
+    // Keep about kLead seconds queued. After a stall (a pause, a hitch) the queue ran dry: start again from now.
+    long long played = (long long)((now - v.start) * kSampleRate);
+    if (v.written < played) v.written = played;
+    long long want = played + (long long)(audio::kLead * kSampleRate) - v.written;
+    if (want <= 0) return;
+    int n = int(std::min<long long>(want, kSampleRate / 5));
+    g_pcm.resize(size_t(n));
+    render(v.synth, level, flag, g_pcm.data(), n);
+    GameBuffer buffer{nullptr, 0, 0};
+    int32_t bytes = n * 2;
+    g_buffer_reset(&buffer, &bytes);
+    if (!buffer.data || buffer.size != bytes) return;
+    std::memcpy(buffer.data, g_pcm.data(), size_t(bytes));
+    g_effect_append(&v.effect, &buffer);
+    if (buffer.data) { int32_t zero = 0; g_buffer_reset(&buffer, &zero); }   // the effect refused it (queue full)
+    v.written += n;
+}
+
+void hk_client_tick(void* self, void* network, void* vehicle, void* scene, const double* dt) {
+    int kind = 0;
+    if (self && anymaker::readable(static_cast<uint8_t*>(self) + off::client_definition, 8)) {
+        std::lock_guard<std::recursive_mutex> lock(g_mutex);
+        kind = kind_of_definition(at<const void*>(self, off::client_definition));
+    }
+    if (!kind) { reinterpret_cast<client_tick_t>(h_client_tick.original)(self, network, vehicle, scene, dt); return; }
+    if (kind != kKindWastegate) stream_sound(self, kind, dt);   // the wastegate is silent, like the real one
+    double now = now_seconds();
+    if (now - g_last_sweep > 1.0) {                 // parts gone from the scene stop ticking: free their voices
+        g_last_sweep = now;
+        for (auto it = g_voices.begin(); it != g_voices.end();)
+            if (now - it->second.last_tick > 1.0) { release_voice(it->second); it = g_voices.erase(it); }
+            else ++it;
+    }
+}
+
 // ------------------------------------------------------------------------------------- install (background thread)
 // The destroy_node slot is read from the stock impeller's destroy, which calls it through the container's method
 // table: relocation 1 of that function, right after its code (code_end 0xe8). It must be 8 * slot.
@@ -641,6 +774,29 @@ bool destroy_slot_matches(void* destroy_entry) {
         return false;
     }
     return true;
+}
+
+// Sounds are optional: without them the parts keep the stock impeller hum.
+void install_sound() {
+    using namespace anymaker::experimental;
+    void** cell = hook_cell(bind::client_centrifugal_tick);
+    void* entry = function(bind::client_centrifugal_tick);
+    g_world_transform = reinterpret_cast<world_transform_t>(function(bind::client_get_world_transform));
+    g_play_voice = reinterpret_cast<play_voice_t>(native(audio::play_voice_rva));
+    g_effect_append = reinterpret_cast<effect_append_t>(native(audio::append_rva));
+    g_effect_place = reinterpret_cast<effect_place_t>(native(audio::set_position_velocity_rva));
+    g_effect_stop = reinterpret_cast<effect_fn_t>(native(audio::stop_rva));
+    g_effect_reset = reinterpret_cast<effect_fn_t>(native(audio::reset_rva));
+    g_buffer_reset = reinterpret_cast<buffer_reset_t>(native(audio::buffer_reset_rva));
+    bool found = cell && entry && *cell == entry && g_world_transform && g_play_voice && g_effect_append && g_effect_place &&
+                 g_effect_stop && g_effect_reset && g_buffer_reset;
+    if (!found || !h_client_tick.install(cell, (void*)&hk_client_tick)) {
+        log(1, "turbo sounds unavailable (client tick %d/%d/%d, transform %d, audio %d/%d/%d/%d/%d/%d); turbos keep the impeller hum",
+            !!cell, !!entry, cell && entry && *cell == entry, !!g_world_transform, !!g_play_voice, !!g_effect_append, !!g_effect_place,
+            !!g_effect_stop, !!g_effect_reset, !!g_buffer_reset);
+        return;
+    }
+    log(0, "turbo sounds on");
 }
 
 void install_hooks() {
@@ -700,6 +856,7 @@ void install_hooks() {
         if (!tooltip_ok || !h_tooltip.install(tooltip, (void*)&hk_tooltip))
             log(1, "turbo tooltip unavailable (tooltip=%d base=%d units=%d/%d/%d pascals=%d string=%d); turbos show the stock impeller tooltip",
                 !!tooltip, !!g_component_tooltip, !!g_units_flow, !!g_units_frequency, !!g_units_pressure, !!g_to_pascals, !!g_string_dtor);
+        install_sound();
         g_ready = true;
         log(0, "Ready after %d s (server tick %s). Load or start a world to add the Turbo parts (definitions %s).", attempt,
             g_delta_time ? "found" : "not found, assuming 60 Hz", g_json_path.c_str());
@@ -707,6 +864,7 @@ void install_hooks() {
     }
 }
 void remove_hooks() {
+    h_client_tick.remove((void*)&hk_client_tick);
     h_add_definitions.remove((void*)&hk_add_definitions);
     h_properties.remove((void*)&hk_properties);
     h_tooltip.remove((void*)&hk_tooltip);

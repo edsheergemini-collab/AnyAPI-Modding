@@ -69,4 +69,12 @@ inline constexpr func_desc pressure_to_pascals{"(f64) units.pressure_to_pascals 
 // Properties Tool rows (the blow-off valve adds its spring setting).
 // () server_scene.vehicle_component.gas_pump_centrifugal.get_properties (server_scene.vehicle_component.gas_pump_centrifugal, server_scene.peer.property_data) | side: server
 inline constexpr func_desc centrifugal_get_properties{"() server_scene.vehicle_component.gas_pump_centrifugal.get_properties (server_scene.vehicle_component.gas_pump_centrifugal, server_scene.peer.property_data)","53 48 83 ec 50 48 89 4c 24 20 48 89 54 24 28 48 8d 81 88 03 00 00 48 89 44 24 30 48 8d 02 48 8d",{"", {}, 0},"53 48 83 ec 30 48 89 4c 24 20 48 8d 01 48 8b 15 3c 01 00 00 48 89 4c 24 28 48 89 c1 ff 12 48 8b 05 33 01 00 00 48 8b 4c 24 28 48 89 01 48 8d 81 e0 01 00 00 48 8d",344u,37};
+// Client side: turbo sounds (the client impeller tick only plays the impeller hum; the mod replaces it for its parts).
+// The reference has no call route for the client tick, so its typeinfo route was added by hand: the anchor is
+// ctor (client_scene.vehicle_component.gas_pump_centrifugal), whose relocation 1 (code_end 152 + 8) is the type,
+// and the tick is method slot 8 (client_scene.md). typeinfo_cell checks the cell against the tick's code.
+// () client_scene.vehicle_component.gas_pump_centrifugal.tick (client_scene.vehicle_component.gas_pump_centrifugal, client, client_scene.vehicle, client_scene, const f64) | side: client
+inline constexpr func_desc client_centrifugal_tick{"() client_scene.vehicle_component.gas_pump_centrifugal.tick (client_scene.vehicle_component.gas_pump_centrifugal, client, client_scene.vehicle, client_scene, const f64)","53 55 48 81 ec 28 01 00 00 48 8b 84 24 60 01 00 00 48 89 4c 24 60 48 89 54 24 68 4c 89 44 24 70",{"", {}, 0},"53 48 83 ec 30 48 89 4c 24 20 48 8d 01 48 8b 15 84 00 00 00 48 89 4c 24 28 48 89 c1 ff 12 48 8b 05 7b 00 00 00 48 8b 4c 24 28 48 89 01 48 8d 81 e0 00 00 00 48 8d 15 4d 00 00 00 4c 8d 05 4e 00 00 00 48 8b 1d 5f 00 00 00 48 89 c1 ff 13 48 8b",160u,8};
+// (mat34) client_scene.vehicle_component.get_world_transform (const client_scene.vehicle_component) | side: client
+inline constexpr func_desc client_get_world_transform{"(mat34) client_scene.vehicle_component.get_world_transform (const client_scene.vehicle_component)","53 55 48 81 ec 48 01 00 00 48 89 4c 24 50 48 89 54 24 58 48 8b 9a c8 00 00 00 48 8d 44 24 60 48",{"", {}, 0},"53 48 83 ec 40 48 89 4c 24 20 48 8d 01 48 8b 15 14 01 00 00 48 89 4c 24 30 48 89 c1 ff 12 48 8b",304u,37};
 } // namespace turbo::bind
