@@ -960,6 +960,7 @@ void install_sound() {
     log(0, "turbo sounds on");
 }
 
+void remove_hooks();
 void install_hooks() {
     using namespace anymaker::experimental;
     for (int attempt = 0; attempt < 180 && !g_stop; ++attempt) {
@@ -1011,7 +1012,7 @@ void install_hooks() {
         bool ok = h_destroy.install(destroy, (void*)&hk_destroy) && h_create.install(create, (void*)&hk_create) &&
                   h_tick.install(tick, (void*)&hk_tick) && h_get_f64.install(get, (void*)&hk_get_f64) &&
                   h_add_definitions.install(add, (void*)&hk_add_definitions);
-        if (!ok) { log(2, "a hook cell was already taken or not writable; Turbo is off"); return; }
+        if (!ok) { log(2, "a hook cell was already taken or not writable; Turbo is off"); remove_hooks(); return; }   // none left half-installed
         void** properties = route::cell(bind::centrifugal_get_properties);
         if (!properties || !h_properties.install(properties, (void*)&hk_properties))
             log(1, "blow-off valve spring setting unavailable (Properties Tool hook not found); it stays at %.0f kPa", kBlowOffDefaultKpa);

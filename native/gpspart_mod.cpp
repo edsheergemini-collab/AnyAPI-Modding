@@ -330,6 +330,7 @@ uint32_t help_input(const AnyInputV1* e, void*) {
 }
 
 // ================================================================== install (background thread)
+void remove_hooks();
 void install_hooks() {
     using namespace anymaker::experimental;
     for (int attempt = 0; attempt < 180 && !g_stop; ++attempt) {
@@ -357,7 +358,7 @@ void install_hooks() {
         if (!g_get_definition) log(1, "definition lookup not found; another mod re-adding definitions may add the GPS Sensor twice");
         bool ok = h_tick.install(tick_cell, (void*)&hk_tick) && h_get_f64.install(get_cell, (void*)&hk_get_f64) &&
                   h_add_definitions.install(add, (void*)&hk_add_definitions);
-        if (!ok) { log(2, "a hook cell was already taken or not writable; GpsPart is off"); return; }
+        if (!ok) { log(2, "a hook cell was already taken or not writable; GpsPart is off"); remove_hooks(); return; }   // none left half-installed
         void** ui_cell = route::cell(bind::client_microcontroller_update_ui);
         if (!ui_cell || !h_update_ui.install(ui_cell, (void*)&hk_update_ui)) log(1, "microcontroller help button unavailable (editor hook not found)");
         else if (!gpu) log(1, "microcontroller help button unavailable (anyapi.gpu_draw missing)");
