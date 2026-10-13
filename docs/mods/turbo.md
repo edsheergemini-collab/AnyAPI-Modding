@@ -17,6 +17,7 @@ and the paint tool colours each side on its own, like any stock part.
 | Boost out (cold side) | Top corner of the front housing, facing sideways | The engine's air intake |
 | Exhaust in (hot side) | Bottom corner of the back housing, facing the other way | The engine's exhaust |
 | Exhaust out (hot side) | Middle of the back face | A gas vent (the tailpipe) |
+| Oil in, oil out | Underneath, side by side | The engine's oil, through an oil cooler (see [Upkeep](#upkeep-oil-air-filter-heat-and-wear)) |
 
 Exhaust flowing from the hot inlet to the hot outlet spins the shaft. The shaft's spool sets how much pressure
 the cold side pushes into the engine's intake. Engines already turn intake pressure into power: ambient gives
@@ -66,6 +67,49 @@ The valves start with a bright steel body and a red cap; paint the body and the 
 a turbo or valve, the preview shows these starting colours. The turbo's own `surge`
 output is 1 while it surges.
 
+## Upkeep: oil, air filter, heat and wear
+
+A turbo wears out, and how fast depends on how it is looked after. Wear follows how hard it works: the
+shaft's spool, which follows the engine's exhaust. Idling it barely wears; with the engine off it does not
+wear at all. The times below are for full boost the whole time:
+
+| Setup | Time to half condition |
+| --- | --- |
+| Oil fed and an air filter | about 20 hours |
+| Oil fed, no filter | about 5 hours |
+| Filter, no oil | about 1.5 hours |
+| Neither | about 15 minutes |
+
+- **Oil.** Pipe oil into the turbo's oil-in port and back out of the oil-out port. Whatever oil reaches the inlet
+  passes through, up to 0.8 L/s, and leaves hotter; an oil cooler in the loop keeps it cool. At 0.5 L/s or more
+  the oil cools the turbo fully. Polluted oil wears it faster, and the turbo ages its oil a little, so keep an oil
+  filter in the loop. Water or fuel in the line does not count as oil.
+- **Heat.** Exhaust heats the turbine and the shaft heats with speed (four times as much with no oil). With oil
+  a turbo at full boost sits around 140 °C; dry it climbs to about 400 °C. Above 250 °C it wears faster, the
+  hotter the faster.
+- **Air filter.** The **Turbo Air Filter** (small pipe, 1 cell) and **Turbo Air Filter (Large)** (large pipe,
+  2x2x2) are cone filters. Pipe the neck to the turbo's intake. Clean air makes the turbo wear four times slower.
+  A filter clogs slowly as it works, about 10 hours of full boost to go fully dirty, and a clogged filter costs up to 15% of the boost. Place a new one to replace it. A new
+  filter starts with a red element and steel caps, and both paint.
+- **Condition.** Down to half, the turbo performs like new. Below that its boost falls (to 60% near the end),
+  and at 0 it has seized: no boost, and the shaft no longer turns. A new turbo is at 1.
+- Wear is saved with each world, in `anyengineparts_wear.json` in the game's working folder, which the game copies
+  into the save slot. A turbo moved to another vehicle (split or welded) starts fresh.
+
+## Intercooler and hot boost air
+
+Compressing air heats it: at full boost the air leaving the turbo is about 120 °C over the air outside. With
+AnyEngineParts every engine, stock or the rotary, feels its intake air's temperature. The boost part of its power
+scales with the air's density against 30 °C air, so hot boost makes less power and cold boost makes more. Boost
+air over 90 °C also knocks a boosted engine, which slowly damages it. Without an intercooler, full boost
+costs a damage step about every 6 to 7 minutes.
+
+The **Turbo Intercooler** (small pipe) and **Turbo Intercooler (Large)** fix that. Pipe the turbo's boost into the
+front port of the bottom tank and take the back port, the one with the blue ring, to the engine's air intake. It stretches like the
+radiator, wider along its width and taller one cell at a time. A bigger core cools better, and so does slower
+air: a 3x2 core takes about three quarters of the heat out of a 3x3 turbo's boost. Its two ports are one pipe, like
+the inline blow-off valve. It has no fan and makes no sound. The tanks paint.
+
 ## Sounds
 
 Turbos and blow-off valves have their own sounds in place of the impeller hum, made by the mod as it plays:
@@ -105,6 +149,11 @@ Wire them from a data port, a data link or a microcontroller. Pressures use the 
 | `exhaust_temperature` | Output | Gas temperature at the hot inlet, °C |
 | `surge` | Output | 1 while the compressor surges (boost pushing back, no blow-off valve venting), else 0 |
 | `antilag` | Output | 1 while antilag is firing to hold the spool, else 0 |
+| `oil_flow` | Output | Oil through the turbo, L/s (0.5 or more cools it fully) |
+| `turbo_temperature` | Output | The turbo's temperature, °C (above 250 it wears faster) |
+| `condition` | Output | 1 new, 0 seized; below 0.5 it loses boost |
+| `air_filter` | Output | 1 with an air filter on the intake, else 0 |
+| `boost_air_temperature` | Output | The boost air after any intercooler, °C (what the engine breathes) |
 | `boost_limit` | Input | A wastegate: caps boost at this pressure in kPa (0 or unwired: no cap) |
 
 ## Getting it
@@ -135,6 +184,17 @@ Wire them from a data port, a data link or a microcontroller. Pressures use the 
   own replicated speed value. The client impeller tick, which only plays the hum, is hooked for the mod's parts:
   it synthesizes 48 kHz audio ([`turbo_sound.h`](../../native/turbo_sound.h)) and streams it into a positional
   voice effect, the way the game plays voice chat. If the hooks are not found, the parts keep the hum.
+- Oil ports are made like the stock fuel manifold's: two liquid contents and nodes for the turbo's two liquid
+  logic nodes, which sit after its four gas nodes so saved pipes keep their meaning. The upkeep model is in
+  [`turbo_health.h`](../../native/turbo_health.h), the wear file in [`turbo_wear_store.h`](../../native/turbo_wear_store.h).
+- The air filter is a stock gas vent class with its own mesh; the turbo finds it on its intake pipe. The intercooler
+  is an impeller-class part with the radiator's stretch keys and three mesh tiles
+  ([`turbo_upkeep_mesh.h`](../../native/turbo_upkeep_mesh.h)); the turbo finds it on its boost pipe and sets the
+  temperature of the air it pushes.
+- Hot boost air: the server engine tick and `math.remap` are hooked. The engine tick notes its air manifolds'
+  temperature; the one remap call it makes for its boost factor, `remap(pressure, 1, 10, 1, 2)`, is scaled for
+  that temperature, and knock is added to the engine's own damage counter afterwards. If the hooks are not found,
+  engines ignore intake temperature as before.
 - The hot side's gas is not saved; it refills from the pipes after loading. Saves that contain a turbo need
   AnyEngineParts installed to load it.
 

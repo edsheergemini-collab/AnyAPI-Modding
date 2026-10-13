@@ -10,6 +10,8 @@ AnyEngineParts adds engine parts to the game, in one mod (`AnyEngineParts.dll`):
 - [Turbochargers](turbo.md) in four sizes (2x2x2 to 5x5x2), driven by the engine's exhaust, with Small and Large
   inline blow-off valves, a wastegate with microcontroller-controlled antilag, boost data channels and
   synthesized whistle, surge, blow-off and antilag sounds.
+- Turbo upkeep: oil ports, a cone air filter, turbo heat and wear saved with each world, and a stretchable
+  intercooler. Hot boost air now costs every engine power and can knock it.
 - A [rotary engine](rotary.md), stretchable from 1 to 4 rotors in the small engine's footprint, with its own
   housing mesh and synthesized sound. It works alongside EngineSound.
 

@@ -1,6 +1,8 @@
 #include "../turbo_logic.h"
 #include "../turbo_mesh.h"
-#include "../turbo_valve_mesh.h"
+#include "../turbo_upkeep_mesh.h"
+#include "../turbo_health.h"
+#include "../turbo_wear_store.h"
 #include "../turbo_sound.h"
 #include <cassert>
 #include <cmath>
@@ -63,7 +65,7 @@ int main() {
     }
     assert(!spec(3).large_pipe && spec(4).large_pipe);
     // Channels.
-    for (int i = 0; i < kChannelCount; ++i) assert(channel_index(kChannels[i].name, std::strlen(kChannels[i].name)) == i && kChannels[i].input == (i >= kFirstInput));
+    for (int i = 0; i < kChannelCount; ++i) assert(channel_index(kChannels[i].name, std::strlen(kChannels[i].name)) == i && kChannels[i].input == (i == kFirstInput));
     assert(channel_index("pressure", 8) < 0);
     // Ports: inside the part, axial ones on the front and back faces.
     for (int n = kMinSize; n <= kMaxSize; ++n)
@@ -74,7 +76,22 @@ int main() {
     std::string json = definitions_json(built, bov_built, wg_built);
     size_t count = 0;
     for (size_t at = 0; (at = json.find("\"class\": \"gas_pump_centrifugal\"", at)) != std::string::npos; ++at) ++count;
-    assert(count == 8);
+    assert(count == 10);                                   // four turbos, two of each valve, two intercoolers
+    assert(json.find("\"class\": \"gas_vent\"") != std::string::npos && json.find("\"class\": \"gas_vent_b\"") != std::string::npos);
+    assert(json.find("\"id\": \"oil_in\"") != std::string::npos && json.find("\"type\": \"liquid\"") != std::string::npos);
+    assert(json.find("radiator_a_0_0_0.mesh") != std::string::npos && json.find("\"mode_y\": \"tile\"") != std::string::npos);
+    {   // with every mesh built the parts use theirs; the intercooler points at its first tile
+        bool all[4] = {true, true, true, true}, two[2] = {true, true};
+        std::string full = definitions_json(all, two, two, two, two);
+        assert(full.find("turbo_turbo_air_filter_large.mesh") != std::string::npos && full.find("turbo_turbo_intercooler_large_0_0_0.mesh") != std::string::npos &&
+               full.find("radiator_a_0_0_0.mesh") == std::string::npos);
+        // the oil ports come after the four gas nodes, so saved gas links keep their meaning
+        size_t entry = full.find("\"name\": \"Turbo 3x3\"");
+        size_t oil = full.find("oil_in", entry), gas = full.find("\"type\": \"gas\"", entry);
+        size_t last_gas = gas;
+        for (int k = 0; k < 3; ++k) last_gas = full.find("\"type\": \"gas\"", last_gas + 1);
+        assert(oil != std::string::npos && last_gas < oil);
+    }
     assert(json.find("turbo_turbo_wastegate.mesh") != std::string::npos && json.find("turbo_turbo_wastegate_large.mesh") == std::string::npos &&
            json.find("\"id\": \"turbo_wastegate_large\"") != std::string::npos);
     assert(json.find("\"id\": \"turbo_blow_off_valve_large\"") != std::string::npos && json.find("turbo_turbo_blow_off_valve_large.mesh") != std::string::npos &&
@@ -259,6 +276,69 @@ int main() {
             peak(al, 0, false, 3 * 48000); assert(peak(al, 0, false, 4800) < 50);
         }
         Synth wild; peak(wild, std::nan(""), true, 4800); assert(peak(wild, 0.5, false, 4800) <= 32767);
+    }
+    // Upkeep: the four setups wear in the order (and roughly the times) promised; hours to half condition at full boost.
+    {
+        auto hours_to_half = [](bool oil, bool filter) {
+            UpkeepState st; UpkeepInputs in; in.spool = 1; in.exhaust_fraction = 1; in.oil_lps = oil ? 0.6 : 0; in.oil_c = 90; in.filter = filter; in.dt = 0.5;
+            for (int s = 0; s < 100 * 7200; ++s) { upkeep(st, in); if (st.condition <= 0.5) return s / 7200.0; }
+            return 1e9;
+        };
+        double both = hours_to_half(true, true), filter_only = hours_to_half(false, true), oil_only = hours_to_half(true, false), neither = hours_to_half(false, false);
+        assert(both > 12 && both < 30);
+        assert(oil_only < both / 2.5 && filter_only < oil_only && neither < filter_only / 3 && neither > 0.1);
+        // Temperatures: oil keeps it under the wear threshold, dry it runs hotter than the exhaust heats it.
+        UpkeepState a, b; UpkeepInputs in; in.spool = 1; in.exhaust_fraction = 1; in.oil_c = 90; in.dt = 0.5;
+        in.oil_lps = 0.6; for (int s = 0; s < 3600; ++s) upkeep(a, in);
+        in.oil_lps = 0; for (int s = 0; s < 3600; ++s) upkeep(b, in);
+        assert(a.temperature < kTurboHotC && b.temperature > a.temperature + 50 && b.temperature <= kTurboMaxC);
+        // Idle and off: no wear; it cools down.
+        UpkeepState c; c.temperature = 300; UpkeepInputs off; off.dt = 1;
+        for (int s = 0; s < 3600; ++s) upkeep(c, off);
+        assert(c.condition == 1 && c.temperature < 40);
+        // Polluted oil wears more; NaNs do no harm.
+        assert(wear_multiplier(true, true, 1) > wear_multiplier(true, true, 0) * 4);
+        UpkeepState n; UpkeepInputs bad; bad.spool = NAN; bad.oil_lps = NAN; bad.oil_c = NAN; bad.dt = NAN; upkeep(n, bad);
+        assert(std::isfinite(n.temperature) && n.condition == 1);
+        assert(condition_head_factor(1) == 1 && condition_head_factor(0.5) == 1 && near(condition_head_factor(0.25), 0.8) && condition_head_factor(0) == 0);
+        assert(bearing_whine(0.1) && !bearing_whine(0.5) && !bearing_whine(0));
+        assert(filter_head_factor(false, 0) == 1 && near(filter_head_factor(true, 0), 0.85) && filter_head_factor(true, 1) == 1);
+    }
+    // Hot boost air: about +120 C at full head, intercoolers take it back out (bigger and slower is better), and the
+    // engine's boost factor follows the air's density; naturally aspirated engines are untouched.
+    {
+        assert(near(compressor_heat(9, 9), 120) && compressor_heat(0, 9) == 0 && compressor_heat(4.5, 9) < 120);
+        assert(intercooler_effectiveness(0, 10) == 0 && intercooler_effectiveness(6, 10) > 0.8 && intercooler_effectiveness(12, 10) > intercooler_effectiveness(6, 10) &&
+               intercooler_effectiveness(6, 80) < intercooler_effectiveness(6, 10));
+        assert(boost_factor_for_air(1.0, 140) == 1.0 && near(boost_factor_for_air(2.0, 30), 2.0) && boost_factor_for_air(2.0, 140) < 1.8 && boost_factor_for_air(2.0, 0) > 2.0);
+        assert(knock_damage(80, 2, 1) == 0 && knock_damage(140, 1.1, 1) == 0 && knock_damage(140, 2, 1) > 0 && std::isfinite(boost_factor_for_air(2.0, NAN)));
+    }
+    // Wear file: round trip, junk ignored, values clamped.
+    {
+        WearMap w{{WearKey{'t', 12, 34}, 0.5}, {WearKey{'f', 12, 40}, 0.25}, {WearKey{'t', -1, 7}, 1.0}};
+        WearMap r = decode_wear(encode_wear(w));
+        assert(r.size() == 3 && near(r[(WearKey{'t', 12, 34})], 0.5) && near(r[(WearKey{'f', 12, 40})], 0.25) && near(r[(WearKey{'t', -1, 7})], 1.0));
+        WearMap j = decode_wear("{\"version\": 1, \"wear\": {\"t1:2\": 7, \"x3:4\": 0.5, \"t5\": 0.5, \"f6:7\": -1, \"t8:9\": nope}}");
+        assert(j.size() == 2 && j[(WearKey{'t', 1, 2})] == 1 && j[(WearKey{'f', 6, 7})] == 0);
+        assert(decode_wear("").empty() && decode_wear("{\"t1:2\"").empty());
+    }
+    // Air filter and intercooler meshes: readable, both paint markers, inside their cells.
+    for (int large = 0; large < 2; ++large) {
+        std::vector<std::vector<uint8_t>> meshes{build_air_filter_mesh(stock, large, "f")};
+        for (int tile = 0; tile < 3; ++tile) meshes.push_back(build_intercooler_tile(stock, large, tile, "i"));
+        for (size_t k = 0; k < meshes.size(); ++k) {
+            MeshLayout m; assert(parse_mesh(meshes[k], m) && m.vertices > 50);
+            std::vector<MeshVertex> v(m.vertices); std::memcpy(v.data(), meshes[k].data() + m.vertex_bytes + 4, v.size() * sizeof(MeshVertex));
+            bool paint0 = false, paint1 = false;
+            double lo[3], hi[3];
+            if (k == 0) { for (int j = 0; j < 3; ++j) { lo[j] = -kCell / 2; hi[j] = (large ? 1.5 : 0.5) * kCell; } }
+            else { lo[0] = -1.5 * kCell; hi[0] = 1.5 * kCell; lo[1] = lo[2] = -kCell / 2; hi[1] = hi[2] = kCell / 2; }
+            for (auto& p : v) {
+                for (int j = 0; j < 3; ++j) assert(p.pos[j] >= lo[j] - 0.003 && p.pos[j] <= hi[j] + 0.003);
+                paint0 = paint0 || (p.rgba[0] == 153 && p.rgba[1] == 0); paint1 = paint1 || (p.rgba[0] == 153 && p.rgba[1] == 38);
+            }
+            assert((paint0 && paint1) || k == 2);             // the middle intercooler tile is all core
+        }
     }
     return 0;
 }

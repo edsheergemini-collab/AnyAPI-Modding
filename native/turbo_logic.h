@@ -77,7 +77,9 @@ inline int size_from_id(const char* id, size_t length) {
 enum Node { kColdIn, kColdOut, kHotIn, kHotOut, kNodeCount };
 
 // Data channels.
-enum Channel { kIntakePressure, kExhaustPressure, kPowerMultiplier, kSpool, kRpm, kExhaustFlow, kIntakeFlow, kExhaustTemperature, kSurge, kBoost, kBoostPsi, kAntilagFiring, kBoostLimit, kChannelCount };
+// New channels go at the end: saved data links refer to them by position.
+enum Channel { kIntakePressure, kExhaustPressure, kPowerMultiplier, kSpool, kRpm, kExhaustFlow, kIntakeFlow, kExhaustTemperature, kSurge, kBoost, kBoostPsi, kAntilagFiring, kBoostLimit,
+               kOilFlow, kTurboTemperature, kCondition, kAirFiltered, kBoostAirTemperature, kChannelCount };
 constexpr int kFirstInput = kBoostLimit;
 struct ChannelInfo { const char* name; bool input; };
 inline constexpr ChannelInfo kChannels[kChannelCount] = {
@@ -94,6 +96,11 @@ inline constexpr ChannelInfo kChannels[kChannelCount] = {
     {"boost_psi", false},           // the same in psi (full boost is about 12.8)
     {"antilag", false},             // 1 while antilag (from a wastegate) is firing to hold the spool, else 0
     {"boost_limit", true},          // input: cap intake pressure (kPa, game scale); 0 = no cap
+    {"oil_flow", false},            // L/s of oil through the turbo (0.5 or more cools it fully)
+    {"turbo_temperature", false},   // C; above 250 it wears fast
+    {"condition", false},           // 1 new, 0 seized; below 0.5 it loses boost
+    {"air_filter", false},          // 1 with an air filter on the compressor intake, else 0
+    {"boost_air_temperature", false},   // C, the boost air after any intercooler (what the engine breathes)
 };
 inline int channel_index(const char* name, size_t length) {
     for (int i = 0; i < kChannelCount; ++i) {
@@ -126,7 +133,17 @@ inline std::string description(int n) {
         "compressor outlet (top) - feed an air manifold. Back: turbine inlet (bottom) from the exhaust manifold and turbine "
         "exhaust out (centre) - vent it. Full boost (98 kPa, double engine power) needs about " + fmt(s.rated_flow) +
         " L/s of exhaust; boost starts near " + fmt(s.rated_flow * kSpoolStart) + " L/s. Bigger turbos move more air with less back pressure but have more lag. " +
-        (s.large_pipe ? "Large pipe." : "Small pipe.");
+        (s.large_pipe ? "Large pipe." : "Small pipe.") +
+        " Underneath: oil in (front) and oil out (back) - circulate engine oil through it with an oil cooler and oil filter. "
+        "It wears with use: much faster without oil flow, without an air filter on its intake, or running hot.";
+}
+
+// Oil: feed in under the compressor housing, drain out under the turbine housing, both under the centre. They come
+// after the four gas nodes (saved links refer to logic nodes by position, so the old ones keep their meaning).
+inline Port oil_port(int n, bool in) { return {in ? 0 : 1, 0, (n - 1) / 2, 2}; }
+inline std::string oil_node(int n, bool in) {
+    Port p = oil_port(n, in);
+    return "{\"id\": \"" + std::string(in ? "oil_in" : "oil_out") + "\", \"pos\": [" + std::to_string(p.x) + ", " + std::to_string(p.y) + ", " + std::to_string(p.z) + "], \"direction\": 2, \"type\": \"liquid\"}";
 }
 
 // One part definition: a resized stock impeller (class gas_pump_centrifugal) with a hot side.
@@ -159,7 +176,8 @@ inline std::string definition_entry(int n, const std::string& mesh_path) {
         "      \"zones\": [{\"bounds_min\": [0, 0, 0], \"bounds_max\": " + box + "}],\n" +
         "      \"interaction_zones\": [],\n" +
         "      \"surfaces\": [\n        " + surfaces + "\n      ],\n" +
-        "      \"logic_nodes\": [\n        " + node(kColdIn) + ",\n        " + node(kColdOut) + ",\n        " + node(kHotIn) + ",\n        " + node(kHotOut) + "\n      ],\n" +
+        "      \"logic_nodes\": [\n        " + node(kColdIn) + ",\n        " + node(kColdOut) + ",\n        " + node(kHotIn) + ",\n        " + node(kHotOut) + ",\n        " +
+            oil_node(n, true) + ",\n        " + oil_node(n, false) + "\n      ],\n" +
         "      \"mesh_static\": {\"mesh_path\": \"" + mesh_path + "\"},\n" +
         "      \"meshes_dynamic\": [],\n" +
         "      \"category\": \"gas\",\n" +
@@ -201,6 +219,7 @@ struct State {
     double intake_flow = 0;      // smoothed L/s
     bool surging = false;
     bool antilag_firing = false;  // antilag is lighting fuel in the exhaust to hold the spool (throttle off)
+    double health = 1;            // share of its head the turbo can still make (wear, clogged filter; turbo_health.h); 0 seized
     double slots[kChannelCount]{};
 };
 
@@ -216,7 +235,7 @@ inline double power_multiplier(double intake_pressure) {
 
 // The compressor's head for the current spool and boost limit (pressure units over its inlet).
 inline double head_for(const State& st, double inlet_pressure) {
-    double head = kMaxHead * st.spool;
+    double head = kMaxHead * st.spool * std::clamp(finite_or(st.health, 1.0), 0.0, 1.0);
     double limit = finite_or(st.slots[kBoostLimit], 0.0);
     if (limit > 0) head = std::min(head, std::max(0.0, limit / kKpaPerUnit - inlet_pressure));
     return head;
@@ -241,6 +260,7 @@ inline Step step(State& st, const Spec& s, const Inputs& in) {
     // It needs the engine running (some exhaust to light).
     st.antilag_firing = in.antilag && target < kAntilagSpool && st.exhaust_flow > kAntilagMinFlow * s.rated_flow;
     if (st.antilag_firing) target = kAntilagSpool;
+    if (!(st.health > 0)) target = 0;             // seized: the shaft no longer turns
     double tau = target > st.spool ? s.spool_up_s : s.spool_down_s;
     st.spool += (target - st.spool) * (1.0 - std::exp(-dt / tau));
     st.spool = clamp01(st.spool);
@@ -287,11 +307,15 @@ inline Step step(State& st, const Spec& s, const Inputs& in) {
 //     passes straight through. Small (small pipe) and large (large pipe) versions.
 //   Wastegate: sits between the exhaust manifold and the downpipe or a vent. Its "open" input (0-1, from a data
 //     link or microcontroller) sets how much exhaust bypasses the turbine, which caps boost. Small and large.
-enum Valve { kNoValve, kBlowOff, kWastegate, kBlowOffLarge, kWastegateLarge };
+enum Valve { kNoValve, kBlowOff, kWastegate, kBlowOffLarge, kWastegateLarge, kAirFilter, kAirFilterLarge, kIntercooler, kIntercoolerLarge };
 constexpr const char* kBlowOffId = "turbo_blow_off_valve";
 constexpr const char* kBlowOffLargeId = "turbo_blow_off_valve_large";
 constexpr const char* kWastegateId = "turbo_wastegate";
 constexpr const char* kWastegateLargeId = "turbo_wastegate_large";
+constexpr const char* kAirFilterId = "turbo_air_filter";
+constexpr const char* kAirFilterLargeId = "turbo_air_filter_large";
+constexpr const char* kIntercoolerId = "turbo_intercooler";
+constexpr const char* kIntercoolerLargeId = "turbo_intercooler_large";
 constexpr double kBlowOffCoeff = 60.0;          // L/s per unit of excess boost while open (small; large x2.5)
 constexpr double kBlowOffLargeFactor = 2.5;
 constexpr double kWastegateCoeff = 40.0;        // L/s per unit of pressure drop, fully open (small; large x2.5)
@@ -310,7 +334,8 @@ inline bool blow_off_shows_open(bool vented_recently, double flow_lps) { return 
 constexpr double kBlowOffMaxKpa = 50.0;
 inline Valve valve_from_id(const char* id, size_t length) {
     auto is = [&](const char* want) { return std::char_traits<char>::length(want) == length && std::char_traits<char>::compare(want, id, length) == 0; };
-    return !id ? kNoValve : is(kBlowOffId) ? kBlowOff : is(kBlowOffLargeId) ? kBlowOffLarge : is(kWastegateId) ? kWastegate : is(kWastegateLargeId) ? kWastegateLarge : kNoValve;
+    return !id ? kNoValve : is(kBlowOffId) ? kBlowOff : is(kBlowOffLargeId) ? kBlowOffLarge : is(kWastegateId) ? kWastegate : is(kWastegateLargeId) ? kWastegateLarge
+         : is(kAirFilterId) ? kAirFilter : is(kAirFilterLargeId) ? kAirFilterLarge : is(kIntercoolerId) ? kIntercooler : is(kIntercoolerLargeId) ? kIntercoolerLarge : kNoValve;
 }
 
 enum ValveChannel { kValveOpen, kValveFlow, kValvePressure, kValveAntilag, kValveChannelCount };
@@ -392,7 +417,10 @@ inline std::string wastegate_entry(bool large, const std::string& mesh) {
         "0 off) burns fuel in the exhaust off throttle so the turbo stays spooled, with bangs and pops. Outputs flow (L/s) and "
         "pressure (kPa). Paint the can and the cap separately.";
     // Data ports on the -x, -z and +z faces of every cell; the torque node (unused) on top.
-    std::string surfaces = "{\"id\": \"torque\", \"dir\": 3, \"type\": \"torque\"}";
+    // The radiator's mounting faces, and the (unused) torque node the impeller class asks for, on top.
+    std::string surfaces = "{\"id\": \"torque\", \"pos\": [0, 1, 0], \"dir\": 3, \"type\": \"torque\"}, "
+        "{\"pos\": [1, 0, 0], \"size\": [1, 2], \"dir\": 1, \"gender\": 2, \"type\": \"port\"}, {\"pos\": [-1, 0, 0], \"size\": [1, 2], \"gender\": 2, \"type\": \"port\"}, "
+        "{\"pos\": [-1, 1, 0], \"size\": [3, 1], \"dir\": 3, \"gender\": 2, \"type\": \"port\"}, {\"pos\": [-1, 0, 0], \"size\": [3, 1], \"dir\": 2, \"gender\": 2, \"type\": \"port\"}";
     for (int x = 0; x <= (large ? 1 : 0); ++x)
         for (int y = 0; y <= (large ? 1 : 0); ++y)
             for (int z = 0; z <= (large ? 1 : 0); ++z) {
@@ -428,18 +456,99 @@ inline std::string wastegate_entry(bool large, const std::string& mesh) {
 }
 inline std::string wastegate_mesh_path(bool large) { return std::string("meshes/components/turbo_") + (large ? kWastegateLargeId : kWastegateId) + ".mesh"; }
 constexpr const char* kValveMeshPath = "meshes/components/gas_port_a.mesh";
+// Air filter: a cone filter for the compressor intake. It is a gas vent to the game (class gas_vent / gas_vent_b,
+// so it draws outside air like one); a turbo whose intake pipe has one on it counts as filtered.
+inline std::string air_filter_entry(bool large, const std::string& mesh) {
+    std::string surfaces = large
+        ? "{\"size\": [2, 2]}, {\"pos\": [0, 0, 1], \"size\": [2, 2], \"dir\": 5}, {\"size\": [2, 2], \"dir\": 4}, {\"pos\": [1, 0, 0], \"size\": [2, 2], \"dir\": 1}, {\"size\": [2, 2], \"dir\": 2}"
+        : "{}, {\"dir\": 1}, {\"dir\": 2}, {\"dir\": 4}, {\"dir\": 5}";
+    std::string description = std::string("Cone air filter for a Turbo's compressor intake, ") + (large ? "large pipe (4x4 and 5x5 turbos)" : "small pipe (2x2 and 3x3 turbos)") +
+        ". Pipe its neck to the turbo's intake (front centre). Clean air makes the turbo wear several times slower. It clogs slowly "
+        "with use and a clogged filter costs a little boost; place a new one to replace it.";
+    return std::string("    {\n") +
+        "      \"id\": \"" + (large ? kAirFilterLargeId : kAirFilterId) + "\",\n" +
+        "      \"name\": \"" + (large ? "Turbo Air Filter (Large)" : "Turbo Air Filter (Small)") + "\",\n" +
+        "      \"description\": \"" + description + "\",\n" +
+        "      \"class\": \"" + (large ? "gas_vent_b" : "gas_vent") + "\",\n" +
+        "      \"zones\": [" + (large ? "{\"bounds_max\": [1, 1, 1]}" : "{}") + "],\n" +
+        "      \"interaction_zones\": [],\n" +
+        "      \"surfaces\": [" + surfaces + "],\n" +
+        "      \"logic_nodes\": [{\"direction\": 2, \"type\": \"gas\"" + (large ? ", \"size\": 1" : "") + "}],\n" +
+        "      \"mesh_static\": {\"mesh_path\": \"" + mesh + "\"},\n" +
+        "      \"meshes_dynamic\": [],\n" +
+        "      \"category\": \"gas\",\n" +
+        "      \"inspection_geometry\": [{" + (large ? "\"p1\": [1.0, 1.0, 1.0]" : "") + "}],\n" +
+        "      \"data_descriptors\": [],\n" +
+        "      \"tech_tier\": 3,\n" +
+        "      \"spawn_probability\": 0.1,\n" +
+        "      \"loot_group\": \"mechanical\",\n" +
+        "      \"constraint_orientations\": [[1, 0, 0, 0, 1, 0, 0, 0, 1]],\n" +
+        "      \"force_emitter_element_rotor\": {\"blades\": []}\n" +
+        "    }";
+}
+inline std::string air_filter_mesh_path(bool large) { return std::string("meshes/components/turbo_") + (large ? kAirFilterLargeId : kAirFilterId) + ".mesh"; }
+
+// Intercooler: stretches like the stock radiator (wider along x, taller in whole cells along y). Boost goes in the
+// front of the bottom tank and out the back, both in the middle; the core cools it. Its two ports are one pipe to
+// the game (as the blow-off valve's are); the turbo feeding it works out how much heat it takes out.
+inline std::string intercooler_mesh_path(bool large, int tile = 0) {
+    return std::string("meshes/components/turbo_") + (large ? kIntercoolerLargeId : kIntercoolerId) + "_0_" + std::to_string(tile) + "_0.mesh";
+}
+inline std::string intercooler_entry(bool large, bool built) {
+    std::string pipe = large ? ", \"size\": 1" : "";
+    std::string description = std::string("Air-to-air intercooler for a Turbo, ") + (large ? "large pipe" : "small pipe") +
+        ". Pipe the turbo's boost into the front port of its bottom tank and the back port to the engine's air manifold. "
+        "Compressing air heats it, and hot air makes less power and can knock the engine; the intercooler cools the boost back "
+        "towards the outside air. Stretch it wider and taller (like a radiator) for more cooling. Paint the tanks. Outputs cooling "
+        "(0 to 1) and temperature (C, the boost air leaving it).";
+    std::string surfaces = "{\"id\": \"torque\", \"dir\": 3, \"type\": \"torque\"}, {\"pos\": [1, 0, 0], \"size\": [1, 1], \"dir\": 1, \"gender\": 2, \"type\": \"port\"}, "
+        "{\"pos\": [-1, 0, 0], \"size\": [1, 1], \"dir\": 0, \"gender\": 2, \"type\": \"port\"}, {\"pos\": [-1, 0, 0], \"size\": [3, 1], \"dir\": 2, \"gender\": 2, \"type\": \"port\"}";
+    return std::string("    {\n") +
+        "      \"id\": \"" + (large ? kIntercoolerLargeId : kIntercoolerId) + "\",\n" +
+        "      \"name\": \"" + (large ? "Turbo Intercooler (Large)" : "Turbo Intercooler (Small)") + "\",\n" +
+        "      \"description\": \"" + description + "\",\n" +
+        "      \"class\": \"gas_pump_centrifugal\",\n" +
+        "      \"zones\": [{\"bounds_min\": [-1, 0, 0], \"bounds_max\": [1, 1, 0]}],\n" +
+        "      \"interaction_zones\": [],\n" +
+        "      \"surfaces\": [" + surfaces + "],\n" +
+        "      \"logic_nodes\": [{\"pos\": [0, 0, 0], \"direction\": 4, \"type\": \"gas\"" + pipe + "}, {\"pos\": [0, 0, 0], \"direction\": 5, \"type\": \"gas\"" + pipe + "}],\n" +
+        "      \"mesh_static\": {\"mesh_path\": \"" + (built ? intercooler_mesh_path(large) : std::string("meshes/components/radiator_a_0_0_0.mesh")) + "\"},\n" +
+        "      \"meshes_dynamic\": [],\n" +
+        "      \"mode_x\": \"stretch\",\n" +
+        "      \"mode_y\": \"tile\",\n" +
+        "      \"interval\": [1, 1, 0],\n" +
+        "      \"center_stretch\": [0.0, 0.5, 0.0],\n" +
+        "      \"category\": \"gas\",\n" +
+        "      \"tags_generated\": \"torque,port,\",\n" +
+        "      \"inspection_geometry\": [{\"p0\": [-1.0, 0.0, 0.0], \"p1\": [1.0, 1.0, 0.0], \"radius\": 0.37}],\n" +
+        "      \"density\": 800.0,\n" +
+        "      \"mateable_port_types\": 2,\n" +
+        "      \"data_descriptors\": [{\"type\": \"type_f64_output\", \"name\": \"cooling\"}, {\"type\": \"type_f64_output\", \"name\": \"temperature\"}],\n" +
+        "      \"tech_tier\": 3,\n" +
+        "      \"spawn_probability\": 0.1,\n" +
+        "      \"loot_group\": \"mechanical\",\n" +
+        "      \"constraint_orientations\": [[1, 0, 0, 0, 1, 0, 0, 0, 1]],\n" +
+        "      \"force_emitter_element_rotor\": {\"blades\": []}\n" +
+        "    }";
+}
+
 
 // The definitions file: all four sizes, the two blow-off valves and the two wastegates. built[n - kMinSize] says
 // whether that size's mesh was written (else the stock small impeller's look); bov_built[large] and wg_built[large]
 // the same for the valves (else the gas vent's look).
-inline std::string definitions_json(const bool built[kMaxSize - kMinSize + 1], const bool bov_built[2] = nullptr, const bool wg_built[2] = nullptr) {
+inline std::string definitions_json(const bool built[kMaxSize - kMinSize + 1], const bool bov_built[2] = nullptr, const bool wg_built[2] = nullptr,
+                                    const bool filter_built[2] = nullptr, const bool cooler_built[2] = nullptr) {
     std::string out = "{\n  \"definitions\": [\n";
     for (int n = kMinSize; n <= kMaxSize; ++n)
         out += definition_entry(n, built[n - kMinSize] ? mesh_path(n) : std::string(kStockMeshPath)) + ",\n";
     for (int large = 0; large < 2; ++large)
         out += blow_off_entry(large, bov_built && bov_built[large] ? blow_off_mesh_path(large) : std::string(kValveMeshPath)) + ",\n";
     for (int large = 0; large < 2; ++large)
-        out += wastegate_entry(large, wg_built && wg_built[large] ? wastegate_mesh_path(large) : std::string(kValveMeshPath)) + (large ? "\n" : ",\n");
+        out += wastegate_entry(large, wg_built && wg_built[large] ? wastegate_mesh_path(large) : std::string(kValveMeshPath)) + ",\n";
+    for (int large = 0; large < 2; ++large)
+        out += air_filter_entry(large, filter_built && filter_built[large] ? air_filter_mesh_path(large) : std::string(large ? "meshes/components/gas_port_b.mesh" : kValveMeshPath)) + ",\n";
+    for (int large = 0; large < 2; ++large)
+        out += intercooler_entry(large, cooler_built && cooler_built[large]) + (large ? "\n" : ",\n");
     return out + "  ]\n}\n";
 }
 
