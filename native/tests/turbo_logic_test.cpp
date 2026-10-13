@@ -161,7 +161,7 @@ int main() {
         double c = (n - 1) * kCell / 2, s = n / 3.0;
         assert(near(v[0].pos[0], -0.04, 1e-6) && near(v[0].pos[1], c - 0.12 * s, 1e-5) && near(v[2].pos[2], c + 0.12 * s, 1e-5));
         assert(near(v[4].pos[0], kCell + 0.04, 1e-6) && near(v[4].pos[1], c + 0.12 * s, 1e-5) && near(v[4].normal[0], 1, 1e-6));
-        assert(v[0].rgba[0] == 153 && v[4].rgba[0] == 156 && v[4].rgba[1] == 74 && v[7].rgba[0] == 51);
+        assert(v[0].rgba[0] == 200 && v[0].rgba[2] == 214 && v[4].rgba[0] == 156 && v[4].rgba[1] == 74 && v[7].rgba[0] == 51);
         // Cold outlet stub lands in the top cell on the +z face; hot inlet stub in the bottom cell on -z.
         assert(int(std::lround(v[3].pos[1] / kCell)) == port(n, kColdOut).y && near(v[3].pos[2], (n - 0.5) * kCell, 1e-5));
         assert(int(std::lround(v[7].pos[1] / kCell)) == port(n, kHotIn).y && near(v[7].pos[2], -0.5 * kCell, 1e-5));

@@ -5,7 +5,7 @@
 > Turbo 0.1.0 is a prototype: it needs AnyAPI 0.37.0 or newer on that build. **Single player only** for now.
 
 Turbo adds four exhaust-driven turbochargers: **Turbo 2x2**, **3x3**, **4x4** and **5x5**. Each is N cells wide,
-N tall and 2 thick. The front cell is the stock impeller's red compressor housing, scaled to the size; the back
+N tall and 2 thick. The front cell is the stock impeller's compressor housing in polished steel, scaled to the size; the back
 cell is a heat-rust turbine housing, the same impeller mirrored.
 
 ## Hooking one up

@@ -5,7 +5,7 @@
 // turbo_a.mesh is the 1 x 3 x 3 cell impeller: x from -0.04 to 0.05 m (the axial intake faces -x, the hub +x),
 // y and z from -0.12 to 0.12 m, the outlet stub on the top (+y) edge leaving +z. One cell is 0.08 m.
 // A turbo of size N (N x N face, 2 cells thick) is:
-//   cold side, cell x = 0: the impeller scaled by N/3 across its face, recentred on the N x N face;
+//   cold side, cell x = 0: the impeller scaled by N/3 across its face, recentred on the N x N face, painted steel;
 //   hot side,  cell x = 1: the same impeller mirrored front to back, turned half a turn about its axis (outlet
 //                          stub at the bottom leaving -z: the turbine inlet) and painted heat-rust.
 // Mesh file layout (Anymaker 0.1.24; the same reader as GpsPart, checked by parse):
@@ -47,7 +47,11 @@ inline bool parse_mesh(const std::vector<uint8_t>& b, MeshLayout& m) {
     return true;
 }
 
-// The stock impeller's red paint becomes heat-rust on the turbine housing; its greys stay.
+// The stock impeller's red paint becomes polished steel on the compressor housing (Nate, 2026-10-13: "a steel grey,
+// kinda chrome") and heat-rust on the turbine housing; its greys stay.
+inline void cold_paint(uint8_t rgba[4]) {
+    if (rgba[0] > 120 && rgba[1] < 40 && rgba[2] < 40) { rgba[0] = 200; rgba[1] = 205; rgba[2] = 214; }
+}
 inline void hot_paint(uint8_t rgba[4]) {
     if (rgba[0] > 120 && rgba[1] < 40 && rgba[2] < 40) { rgba[0] = 156; rgba[1] = 74; rgba[2] = 32; }
 }
@@ -88,6 +92,8 @@ inline std::vector<uint8_t> build_turbo_mesh(const std::vector<uint8_t>& stock, 
                 x = float(kCell) - x; y = -y; z = -z;
                 nx = -nx; ny = -ny; nz = -nz;
                 hot_paint(o.rgba);
+            } else {
+                cold_paint(o.rgba);
             }
             o.pos[0] = x; o.pos[1] = y * s + c; o.pos[2] = z * s + c;
             const float nin[3] = {nx, ny, nz};
