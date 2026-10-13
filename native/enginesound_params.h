@@ -24,24 +24,25 @@ enum Effect : int32_t {
 // ------------------------------------------------------------------ engine types
 // Each type picks the two recorded loops (main and low/body layer) and their pitch ratios, plus how fast
 // a cam lope pulses. These are starting points chosen by ear-guess; tune after in-game listening.
-struct EngineType { const char* name; int32_t main; double main_ratio; int32_t low; double low_ratio; double lope_hz; };
+// flare: how far revs blip above idle when the engine catches (0 = none). limiter_hz: rev limiter cut rate.
+struct EngineType { const char* name; int32_t main; double main_ratio; int32_t low; double low_ratio; double lope_hz; double flare; double limiter_hz; };
 inline constexpr EngineType kTypes[16] = {
-    {"Stock 1",          kEngineHighA, 1.00, kEngineBaseA, 1.00, 2.6},
-    {"Stock 2",          kEngineHighB, 1.00, kEngineBaseA, 1.00, 2.6},
-    {"Stock 3",          kEngineHighC, 1.00, kEngineBaseA, 1.00, 2.2},
-    {"Inline-4",         kEngineHighA, 0.80, kEngineBaseA, 1.10, 3.0},
-    {"Inline-6",         kEngineHighA, 0.60, kEngineHighC, 1.20, 2.8},
-    {"V6",               kEngineHighB, 0.55, kEngineHighC, 0.95, 2.6},
-    {"V8 cross-plane",   kEngineHighC, 1.05, kEngineHighC, 0.60, 2.2},
-    {"V8 flat-plane",    kEngineHighB, 0.62, kEngineHighA, 0.70, 2.8},
-    {"V10",              kEngineHighB, 0.72, kEngineHighC, 0.90, 2.6},
-    {"V12",              kEngineHighB, 0.85, kEngineHighA, 0.85, 3.2},
-    {"Boxer-4",          kEngineHighC, 1.25, kEngineHighA, 0.65, 2.0},
-    {"Diesel inline-6",  kEngineHighC, 0.80, kEngineBaseA, 0.75, 2.0},
-    {"Diesel V8",        kEngineHighC, 0.68, kEngineBaseA, 0.60, 1.8},
-    {"Big-rig diesel",   kEngineHighC, 0.55, kEngineBaseA, 0.50, 1.5},
-    {"Rotary",           kEngineHighB, 0.95, kEngineHighA, 1.10, 4.0},
-    {"Electric",         kMotorA,      1.00, kMotorB,      1.00, 0.0},
+    {"Stock 1",          kEngineHighA, 1.00, kEngineBaseA, 1.00, 2.6, 0.00, 0},
+    {"Stock 2",          kEngineHighB, 1.00, kEngineBaseA, 1.00, 2.6, 0.00, 0},
+    {"Stock 3",          kEngineHighC, 1.00, kEngineBaseA, 1.00, 2.2, 0.00, 0},
+    {"Inline-4",         kEngineHighA, 0.80, kEngineBaseA, 1.10, 3.0, 0.60, 12},
+    {"Inline-6",         kEngineHighA, 0.60, kEngineHighC, 1.20, 2.8, 0.50, 11},
+    {"V6",               kEngineHighB, 0.55, kEngineHighC, 0.95, 2.6, 0.50, 10},
+    {"V8 cross-plane",   kEngineHighC, 1.05, kEngineHighC, 0.60, 2.2, 0.55, 8},
+    {"V8 flat-plane",    kEngineHighB, 0.62, kEngineHighA, 0.70, 2.8, 0.60, 12},
+    {"V10",              kEngineHighB, 0.72, kEngineHighC, 0.90, 2.6, 0.55, 12},
+    {"V12",              kEngineHighB, 0.85, kEngineHighA, 0.85, 3.2, 0.50, 13},
+    {"Boxer-4",          kEngineHighC, 1.25, kEngineHighA, 0.65, 2.0, 0.55, 10},
+    {"Diesel inline-6",  kEngineHighC, 0.80, kEngineBaseA, 0.75, 2.0, 0.25, 5},
+    {"Diesel V8",        kEngineHighC, 0.68, kEngineBaseA, 0.60, 1.8, 0.25, 5},
+    {"Big-rig diesel",   kEngineHighC, 0.55, kEngineBaseA, 0.50, 1.5, 0.20, 4},
+    {"Rotary",           kEngineHighB, 0.95, kEngineHighA, 1.10, 4.0, 0.65, 14},
+    {"Electric",         kMotorA,      1.00, kMotorB,      1.00, 0.0, 0.00, 0},
 };
 
 // ------------------------------------------------------------------ sliders
@@ -130,7 +131,13 @@ inline int induction(const Params& p) { return p.v[kInduction] & 3; }
 inline double boost_volume(const Params& p) { constexpr double b[4] = {0.25, 0.5, 0.8, 1.1}; return b[p.v[kBoost] & 3]; }
 inline double crackle_rate(const Params& p) { constexpr double r[4] = {0, 3, 7, 14}; return r[p.v[kCrackle] & 3]; }  // pops/s at full revs
 inline double load_response(const Params& p) { constexpr double l[4] = {0, 0.3, 0.6, 1.0}; return l[p.v[kLoad] & 3]; }
-inline double smoothing_seconds(const Params& p) { return p.v[kSmoothing] ? 0.2 : 0.0; }
+// Rev smoothing: pitch climbs quicker than it falls, like a flywheel. Off = the game's own response for stock
+// types and a light, natural inertia for the others.
+inline bool realism(const Params& p) { return (p.v[kType] & 15) >= 3; }   // stock types stay exactly stock
+inline double smoothing_seconds(const Params& p, bool rising = true) {
+    if (p.v[kSmoothing]) return rising ? 0.12 : 0.35;
+    return realism(p) ? (rising ? 0.04 : 0.09) : 0.0;
+}
 inline int32_t main_effect(const Params& p) { return engine_type(p).main; }
 inline int32_t low_effect(const Params& p) { return engine_type(p).low; }
 
@@ -164,6 +171,53 @@ inline Lope lope(const Params& p, double rpm, double t) {
     double a = std::sin(tau * hz * t), b = std::sin(tau * hz * 1.61 * t + 1.3);
     double pulse = 0.5 + 0.5 * a * b;                       // 0..1, uneven beat
     return {1.0 - 0.6 * depth * pulse, 1.0 + 0.05 * depth * a};
+}
+
+// ------------------------------------------------------------------ realism layer (non-stock types only)
+// These make a non-stock engine behave like a running machine instead of a pitched loop. Stock types
+// (Engine type 0-2) skip all of them, so a neutral Custom tune still sounds exactly like stock sound 1.
+
+// Start-up flare: revs blip above idle when the engine catches, then settle. t = seconds since it started.
+inline double startup_flare(const Params& p, double t) {
+    double depth = realism(p) ? engine_type(p).flare : 0.0;
+    if (depth <= 0 || !std::isfinite(t) || t < 0 || t > 2.5) return 1.0;
+    double rise = std::min(1.0, t / 0.16), decay = std::exp(-std::max(0.0, t - 0.16) / 0.33);
+    return 1.0 + depth * rise * decay;
+}
+
+// Rev limiter: at the top of the rev range under load, fuel is cut in quick bursts. cut is 0..1 per tick.
+struct Limiter { double volume; double pitch; double cut; };
+inline Limiter rev_limiter(const Params& p, double rpm, double load, double t) {
+    double hz = realism(p) ? engine_type(p).limiter_hz : 0.0;
+    rpm = clamp01(rpm); load = clamp01(load);
+    if (hz <= 0 || rpm < 0.96 || load < 0.5 || !std::isfinite(t)) return {1, 1, 0};
+    double strength = std::min(1.0, (rpm - 0.96) / 0.03) * std::min(1.0, (load - 0.5) / 0.3);
+    double phase = t * hz - std::floor(t * hz);
+    double cut = phase < 0.4 ? strength * (1.0 - phase / 0.4) : 0.0;
+    return {1.0 - 0.5 * cut, 1.0 - 0.04 * cut, cut};
+}
+
+// Combustion is never perfectly even: a small, smooth wobble in pitch and loudness that grows with load.
+struct Wobble { double volume; double pitch; };
+inline Wobble firing_wobble(const Params& p, double load, double t) {
+    if (!realism(p) || engine_type(p).main == kMotorA || !std::isfinite(t)) return {1, 1};
+    constexpr double tau = 6.283185307179586;
+    double j = (std::sin(tau * 5.3 * t) + std::sin(tau * 7.9 * t + 1.1) + std::sin(tau * 11.7 * t + 2.3)) / 3.0;
+    double g = 0.3 + 0.7 * clamp01(load);
+    return {1.0 + 0.06 * j * g, 1.0 + 0.006 * j * g};
+}
+
+// Overrun: coasting at high revs with the throttle shut sounds hollow, so the body layer comes forward.
+inline double overrun_body_gain(const Params& p, double rpm, double load) {
+    if (!realism(p)) return 1.0;
+    return 1.0 + 0.5 * (0.4 + load_response(p)) * clamp01(rpm) * (1.0 - clamp01(load));
+}
+
+// Exhaust crackle comes in bursts of pops, not single random pops. Returns the pops in the next burst.
+inline int crackle_burst_size(const Params& p, double random01) {
+    int level = p.v[kCrackle] & 3;
+    if (!level) return 0;
+    return 1 + level + int(clamp01(random01) * (level + 1));   // Light 2-3, Medium 3-5, Heavy 4-7
 }
 
 // Turbo spool target from revs and load; the caller smooths it (lag) per engine.

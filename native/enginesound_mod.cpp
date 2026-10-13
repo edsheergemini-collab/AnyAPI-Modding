@@ -82,6 +82,7 @@ struct EngineState {
     uint8_t* engine; uint64_t used;
     double speed = NAN, spool = 0, time = 0, load_peak = 0, power_peak = 0, power_volume = 0;
     double crackle_until = -1, blowoff_ready = 0, prev_load = 0;
+    double started_at = -10, silent_since = 0, next_pop = 0; int burst_left = 0; bool running = false, limiter_cut = false;
     double pos[3]{}; bool has_pos = false; int32_t group = 4; uint32_t rng = 0x9e3779b9u;
 };
 EngineState g_states[64];
@@ -97,6 +98,46 @@ EngineState& state_for(uint8_t* e) {
     return *oldest;
 }
 double random01(EngineState& st) { st.rng ^= st.rng << 13; st.rng ^= st.rng >> 17; st.rng ^= st.rng << 5; return (st.rng & 0xffffff) / double(0x1000000); }
+
+// Which recording each voice was started with (main thread). A game voice keeps playing the recording it
+// started with: the effect passed on later updates is ignored while it plays. So when the sound choice
+// changes under a running voice (an engine spawned from a save starts with the stock sound before its saved
+// choice arrives, or a sound changed while the engine runs), the voice must be stopped and restarted, or the
+// stock recording keeps playing underneath the new sound.
+struct VoiceRecord { uint8_t* single; int32_t effect; uint64_t used; };
+VoiceRecord g_voices[512];
+uint64_t g_voice_clock;
+VoiceRecord& voice_record(uint8_t* single) {
+    VoiceRecord* oldest = &g_voices[0];
+    for (auto& v : g_voices) {
+        if (v.single == single) { v.used = ++g_voice_clock; return v; }
+        if (v.used < oldest->used) oldest = &v;
+    }
+    *oldest = {single, -1, ++g_voice_clock};
+    return *oldest;
+}
+// audio_effect_single: m_is_set (bool) at +0, m_effect (application.audio.effect_3d handle) at +8.
+bool voice_playing(const uint8_t* single) { return rd<uint8_t>(single, 0) != 0; }
+std::atomic<int> g_restart_logs{24};
+bool g_restart_failed_logged;
+void send_voice(uint8_t* single, double volume, double speed, int32_t effect, const int32_t* group, const void* pos) {
+    auto original = reinterpret_cast<vol_speed_t>(h_vol_speed.original);
+    VoiceRecord& r = voice_record(single);
+    if (voice_playing(single) && r.effect != effect) {
+        // A zero-volume update ends the voice; it starts again next tick with the right recording.
+        void* handle = rd<void*>(single, 8);
+        double zero = 0;
+        original(single, &zero, &speed, &effect, group, pos);
+        bool ended = !voice_playing(single) || rd<void*>(single, 8) != handle;
+        if (g_restart_logs.fetch_sub(1) > 0) log(0, "voice restart: recording %d -> %d (%s)", r.effect, effect, ended ? "ok" : "did not stop");
+        if (ended) { r.effect = -1; return; }
+        if (!g_restart_failed_logged) { g_restart_failed_logged = true; log(1, "a voice did not stop on a zero-volume update; stale recordings may play"); }
+        r.effect = effect;   // don't retry every tick
+    }
+    bool was_playing = voice_playing(single);
+    original(single, &volume, &speed, &effect, group, pos);
+    if (!was_playing && voice_playing(single)) r.effect = effect;
+}
 
 std::atomic<void*> g_audio_manager{nullptr};
 std::atomic<int> g_oneshot_logs{8};
@@ -161,7 +202,8 @@ void hk_vol_speed(uint8_t* single, const double* volume_in, const double* speed_
     bool damaged = rd<uint8_t>(e, off::engine_is_damage) != 0;
     if (c.mode == Mode::Vanilla || slot == 3 || (slot == 2 && (damaged || induction(c.params) == 0))) {
         diag_voice(slot, index, *volume_in, *speed_in, *volume_in, *speed_in, effect ? *effect : -1, group ? *group : -1);
-        return original(single, volume_in, speed_in, effect, group, pos);
+        if (slot == 3 || !effect) return original(single, volume_in, speed_in, effect, group, pos);
+        return send_voice(single, *volume_in, *speed_in, *effect, group, pos);
     }
     const Params& p = c.params;
     double rpm = clamp01(rd<double>(e, off::engine_factor_speed)), load = clamp01(rd<double>(e, off::engine_factor_power));
@@ -177,25 +219,52 @@ void hk_vol_speed(uint8_t* single, const double* volume_in, const double* speed_
         st.power_volume = *volume_in; st.power_peak = std::max(st.power_peak * (1 - 0.02 * dt), *volume_in);
         int kind = induction(p);
         st.spool = smooth(st.spool, kind ? spool_target(rpm, load) : 0, spool_seconds(kind), dt);
-        Lope l = lope(p, rpm, st.time);
-        st.speed = smooth(st.speed, *speed_in * pitch_multiplier(p, rpm, load) * l.pitch, smoothing_seconds(p), dt);
-        speed_out = clamp_speed(st.speed);
-        volume_out = clamp_volume(*volume_in * volume(p) * load_gain(p, load) * l.volume);
-        effect_out = main_effect(p);
+        // Start-up: the engine is running when the game makes the main voice audible; a start after a pause
+        // gets a rev flare (and a pop if the tune crackles).
         bool running = *volume_in > 0.001;
+        if (running && !st.running && st.time - st.silent_since > 0.6) {
+            st.started_at = st.time;
+            if (crackle_rate(p) > 0) play_oneshot(st, kEnginePop);
+        }
+        if (!running && st.running) st.silent_since = st.time;
+        st.running = running;
+        Lope l = lope(p, rpm, st.time);
+        Limiter lim = rev_limiter(p, rpm, load, st.time);
+        Wobble wob = firing_wobble(p, load, st.time);
+        double target = *speed_in * pitch_multiplier(p, rpm, load) * l.pitch * startup_flare(p, st.time - st.started_at);
+        bool rising = !std::isfinite(st.speed) || target > st.speed;
+        st.speed = smooth(st.speed, target, smoothing_seconds(p, rising), dt);
+        speed_out = clamp_speed(st.speed * lim.pitch * wob.pitch);
+        volume_out = clamp_volume(*volume_in * volume(p) * load_gain(p, load) * l.volume * lim.volume * wob.volume);
+        effect_out = main_effect(p);
+        // Limiter cuts pop now and then on tunes that crackle.
+        bool cut = lim.cut > 0.5;
+        if (running && cut && !st.limiter_cut && crackle_rate(p) > 0 && random01(st) < 0.35) play_oneshot(st, kEnginePop);
+        st.limiter_cut = cut;
         // Lift-off: load falls away after being high. Starts a crackle window and (turbo) a blow-off.
         st.load_peak = std::max(load, st.load_peak - 1.5 * dt);
         if (running && load < 0.15 && st.load_peak > 0.5 && rpm > 0.3) {
-            if (crackle_rate(p) > 0 && st.crackle_until < st.time) st.crackle_until = st.time + 1.5;
+            if (crackle_rate(p) > 0 && st.crackle_until < st.time) { st.crackle_until = st.time + 1.6; st.burst_left = 0; st.next_pop = st.time + 0.06; }
             if ((kind == 1 || kind == 3) && st.spool > 0.45 && st.time >= st.blowoff_ready) { play_oneshot(st, kFluidGasVent); st.blowoff_ready = st.time + 1.2; }
             st.load_peak = 0;
         }
-        if (running && st.time < st.crackle_until && random01(st) < crackle_rate(p) * rpm * dt) play_oneshot(st, kEnginePop);
+        // Overrun crackle: bursts of pops with short gaps while revs are up after a lift-off.
+        if (running && st.time < st.crackle_until && st.time >= st.next_pop) {
+            if (st.burst_left <= 0) {
+                st.burst_left = crackle_burst_size(p, random01(st));
+                if (st.burst_left > 0 && random01(st) > 0.35 + 0.65 * rpm) st.burst_left = 0;   // fewer bursts as revs drop
+                st.next_pop = st.time + 0.12 + 0.3 * random01(st);
+            } else {
+                play_oneshot(st, kEnginePop);
+                --st.burst_left;
+                st.next_pop = st.time + 0.035 + 0.09 * random01(st);
+            }
+        }
         st.prev_load = load;
     } else if (slot == 0) {
         Lope l = lope(p, rpm, st.time);
         speed_out = clamp_speed(*speed_in * body_pitch_multiplier(p, rpm));
-        volume_out = clamp_volume(*volume_in * body_layer(p) * l.volume * std::sqrt(load_gain(p, load)));
+        volume_out = clamp_volume(*volume_in * body_layer(p) * l.volume * std::sqrt(load_gain(p, load)) * overrun_body_gain(p, rpm, load));
         effect_out = low_effect(p);
     } else {
         // Spare knock voice carries the induction layer while the engine is healthy.
@@ -207,7 +276,7 @@ void hk_vol_speed(uint8_t* single, const double* volume_in, const double* speed_
         volume_out = clamp_volume(layer.volume * on);
     }
     diag_voice(slot, index, *volume_in, *speed_in, volume_out, speed_out, effect_out, group ? *group : -1);
-    original(single, &volume_out, &speed_out, &effect_out, group, pos);
+    send_voice(single, volume_out, speed_out, effect_out, group, pos);
 }
 
 void hk_play(void* manager, const int32_t* effect, const int32_t* group, const void* pos, const void* vel) {
