@@ -26,11 +26,12 @@ Anymaker 0.1.23 keeps AnyAPI 0.34.1.
 
 ## Prototypes
 
-Built from source only, not in the catalog yet. It uses the experimental SDK.
+Built from source only, not in the catalog yet. They use the experimental SDK.
 
 | Mod | Features | Optional integration |
 | --- | --- | --- |
 | [AnyLights](lights.md) | Light colours and flash patterns in the Properties Tool, with data port and microcontroller channels | AnyHelpers settings |
+| [Turbo](turbo.md) | Exhaust-driven turbochargers from 2x2x2 to 5x5x2 with size-dependent lag and boost data channels; single player | None |
 
 See [validation status](../development/validation.md) for tested behavior and limits,
 including what has and has not been checked in multiplayer.

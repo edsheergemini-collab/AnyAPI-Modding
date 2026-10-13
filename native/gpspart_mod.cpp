@@ -70,6 +70,8 @@ constexpr int32_t kStoreSystem = 1;                 // file.e_store.system (stat
 
 using string_ctor_t = void (*)(anymaker::gc_string_view*, const char*);
 string_ctor_t g_string_ctor;
+using get_definition_t = void (*)(const void** ret, const void* container, const anymaker::gc_string_view* id);
+get_definition_t g_get_definition;
 
 // file.path { e_store m_store; string m_path; } (24 bytes)
 struct GamePath { int32_t store; uint32_t pad; anymaker::gc_string_view path; };
@@ -162,9 +164,20 @@ bool add_ours(void* container, int32_t store, const std::string& text) {
     return ok;
 }
 
+// True when the GPS Sensor is already in this container. Another mod hooking the same cell (Turbo does) calls
+// down through this hook when it adds its own parts; without this check the GPS Sensor would be added twice.
+bool already_added(void* container) {
+    if (!g_get_definition || !g_string_ctor) return false;
+    anymaker::gc_string_view id{};
+    g_string_ctor(&id, kDefinitionId);
+    const void* found = nullptr;
+    g_get_definition(&found, container, &id);
+    return found != nullptr;
+}
+
 void hk_add_definitions(void* container, const void* file) {
     reinterpret_cast<add_definitions_t>(h_add_definitions.original)(container, file);
-    if (!g_ready.load() || g_adding == std::this_thread::get_id() || !container) return;
+    if (!g_ready.load() || g_adding == std::this_thread::get_id() || !container || already_added(container)) return;
     std::string forward = g_json_path;
     for (char& c : forward) if (c == '\\') c = '/';
     bool ok = add_ours(container, kStoreSystem, g_json_path) || add_ours(container, kStoreSystem, forward);
@@ -338,6 +351,8 @@ void install_hooks() {
         }
         if (!write_definition_file()) { log(2, "could not write the GPS Sensor definition file; GpsPart is off"); return; }
         g_file_ctor = ctor; g_file_dtor = dtor; g_file_load = load; g_vehicle_transform = vt; g_component_transform = ct; g_string_ctor = sc;
+        g_get_definition = reinterpret_cast<get_definition_t>(function(bind::definitions_get_by_id));
+        if (!g_get_definition) log(1, "definition lookup not found; another mod re-adding definitions may add the GPS Sensor twice");
         bool ok = h_tick.install(tick_cell, (void*)&hk_tick) && h_get_f64.install(get_cell, (void*)&hk_get_f64) &&
                   h_add_definitions.install(add, (void*)&hk_add_definitions);
         if (!ok) { log(2, "a hook cell was already taken or not writable; GpsPart is off"); return; }

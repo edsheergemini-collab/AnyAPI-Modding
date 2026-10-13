@@ -1,0 +1,120 @@
+#include "../turbo_logic.h"
+#include "../turbo_mesh.h"
+#include <cassert>
+#include <cmath>
+#include <cstring>
+#include <string>
+#include <vector>
+using namespace turbo;
+static bool near(double a, double b, double e = 1e-6) { return std::abs(a - b) < e; }
+
+// A fake 1 x 3 x 3 impeller mesh in the stock layout: one quad on the intake face, one on the outlet stub.
+static std::vector<uint8_t> fake_impeller() {
+    std::vector<MeshVertex> v;
+    auto add = [&](float x, float y, float z, float nx, float ny, float nz, uint8_t r) {
+        MeshVertex m{}; m.pos[0] = x; m.pos[1] = y; m.pos[2] = z; m.rgba[0] = r; m.rgba[3] = 255; m.normal[0] = nx; m.normal[1] = ny; m.normal[2] = nz; v.push_back(m);
+    };
+    add(-0.04f, -0.12f, -0.12f, -1, 0, 0, 153); add(-0.04f, 0.12f, -0.12f, -1, 0, 0, 153); add(-0.04f, 0.12f, 0.12f, -1, 0, 0, 153); add(0.05f, 0.08f, 0.12f, 0, 0, 1, 51);
+    std::vector<uint32_t> idx = {0, 1, 2, 1, 2, 3};
+    std::vector<uint8_t> b;
+    auto put = [&](const void* p, size_t n) { auto* c = static_cast<const uint8_t*>(p); b.insert(b.end(), c, c + n); };
+    uint32_t u = 5, one = 1, name = 4;
+    put("mesh", 4); put(&u, 4); put(&one, 4); put(&name, 4); put("test", 4);
+    std::vector<uint8_t> zeros(88, 0); put(zeros.data(), zeros.size());
+    double bounds[6] = {-0.04, -0.12, -0.12, 0.05, 0.12, 0.12}; put(bounds, sizeof bounds);
+    u = uint32_t(v.size() * sizeof(MeshVertex)); put(&u, 4); put(v.data(), v.size() * sizeof(MeshVertex));
+    u = uint32_t(idx.size() * 4); put(&u, 4); put(idx.data(), idx.size() * 4);
+    uint8_t trailer[8] = {}; put(trailer, 8);
+    return b;
+}
+
+// Runs the model against a simple plant: an engine pushing `exhaust_lps` into the hot inlet, a vent on the hot
+// outlet and the compressor intake, and an air manifold drawing `air_lps` from the compressor outlet.
+struct Plant { double cap = 2.0, hot_in = 2.0, cold_out = 2.0; };
+static double run(State& st, const Spec& s, Plant& pl, double exhaust_lps, double air_lps, double seconds, double dt = 1.0 / 60) {
+    for (double t = 0; t < seconds; t += dt) {
+        pl.hot_in += exhaust_lps * dt;
+        pl.cold_out = std::max(0.0, pl.cold_out - air_lps * dt);
+        Inputs in;
+        in.pressure[kHotIn] = pl.hot_in / pl.cap; in.volume[kHotIn] = pl.hot_in;
+        in.pressure[kHotOut] = 1; in.volume[kHotOut] = pl.cap;
+        in.pressure[kColdIn] = 1; in.volume[kColdIn] = pl.cap;
+        in.pressure[kColdOut] = pl.cold_out / pl.cap; in.volume[kColdOut] = pl.cold_out;
+        in.dt = dt;
+        Step o = step(st, s, in);
+        pl.hot_in -= o.turbine_move;
+        pl.cold_out += o.compressor_move;
+    }
+    return pl.cold_out / pl.cap;
+}
+
+int main() {
+    // Ids and sizes.
+    for (int n = kMinSize; n <= kMaxSize; ++n) { std::string id = definition_id(n); assert(size_from_id(id.c_str(), id.size()) == n); }
+    assert(size_from_id("turbo", 5) == 0 && size_from_id("turbocharger_6", 14) == 0 && size_from_id("turbocharger_1", 14) == 0);
+    // Specs grow with size: more flow, more lag.
+    for (int n = kMinSize; n < kMaxSize; ++n) {
+        Spec a = spec(n), b = spec(n + 1);
+        assert(b.rated_flow > a.rated_flow && b.spool_up_s > a.spool_up_s && b.compressor_coeff > a.compressor_coeff && b.max_rpm < a.max_rpm);
+    }
+    assert(!spec(3).large_pipe && spec(4).large_pipe);
+    // Channels.
+    for (int i = 0; i < kChannelCount; ++i) assert(channel_index(kChannels[i].name, std::strlen(kChannels[i].name)) == i && kChannels[i].input == (i >= kFirstInput));
+    assert(channel_index("pressure", 8) < 0);
+    // Ports: inside the part, axial ones on the front and back faces.
+    for (int n = kMinSize; n <= kMaxSize; ++n)
+        for (int k = 0; k < kNodeCount; ++k) { Port p = port(n, Node(k)); assert(p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y < n && p.z >= 0 && p.z < n); }
+    assert(port(3, kColdIn).dir == 0 && port(3, kHotOut).dir == 1 && port(3, kColdIn).y == 1 && port(4, kColdOut).y == 3 && port(5, kHotIn).z == 0);
+    // Definitions file: four entries, four gas nodes each, the stock class, balanced braces.
+    bool built[4] = {true, true, false, true};
+    std::string json = definitions_json(built);
+    size_t count = 0;
+    for (size_t at = 0; (at = json.find("\"class\": \"gas_pump_centrifugal\"", at)) != std::string::npos; ++at) ++count;
+    assert(count == 4);
+    assert(json.find("turbo_turbocharger_2.mesh") != std::string::npos && json.find("turbo_turbocharger_4.mesh") == std::string::npos && json.find("turbo_a.mesh") != std::string::npos);
+    assert(json.find("\"name\": \"Turbo 5x5\"") != std::string::npos && json.find("\"type_f64_input\", \"name\": \"boost_limit\"") != std::string::npos);
+    int depth = 0, square = 0; bool in_string = false;
+    for (char c : json) {
+        if (c == '"') in_string = !in_string;
+        if (in_string) continue;
+        depth += c == '{' ? 1 : c == '}' ? -1 : 0; square += c == '[' ? 1 : c == ']' ? -1 : 0;
+        assert(depth >= 0 && square >= 0);
+    }
+    assert(depth == 0 && square == 0 && !in_string);
+    // Model: no exhaust, no spool; the compressor still lets a naturally aspirated engine breathe.
+    { State st; Plant pl; Spec s = spec(3); double p = run(st, s, pl, 0, 8, 10); assert(st.spool < 1e-9 && p > 0.6 && p < 1.0); }
+    // Rated exhaust flow spools to full boost and back pressure stays under the 4 units that cut engine power.
+    { State st; Plant pl; Spec s = spec(3); double p = run(st, s, pl, s.rated_flow, s.rated_flow * 0.9, 20);
+      assert(st.spool > 0.95 && p > 8.5 && pl.hot_in / pl.cap < 4.0); assert(near(st.slots[kPowerMultiplier], power_multiplier(p), 0.05)); }
+    // Lag: after one second a 5x5 has built less spool than a 2x2 at the same relative flow.
+    { State a, b; Plant pa, pb; run(a, spec(2), pa, spec(2).rated_flow, 0, 1.0); run(b, spec(5), pb, spec(5).rated_flow, 0, 1.0); assert(a.spool > b.spool + 0.15); }
+    // A big engine on a small turbo chokes it: back pressure goes past the engine's 4-unit limit.
+    { State st; Plant pl; run(st, spec(2), pl, 40, 30, 10); assert(pl.hot_in / pl.cap > 4.0); }
+    // The same flow on a 5x5 is too little for full boost.
+    { State st; Plant pl; run(st, spec(5), pl, 25, 20, 20); assert(st.spool < 0.4); }
+    // Boost limit (kPa, game scale) caps the intake pressure.
+    { State st; st.slots[kBoostLimit] = 49; Plant pl; Spec s = spec(3); double p = run(st, s, pl, s.rated_flow, s.rated_flow * 0.5, 20); assert(p < 5.05 && p > 3.5); }
+    // Spool falls when the exhaust stops.
+    { State st; Plant pl; Spec s = spec(3); run(st, s, pl, s.rated_flow, 0, 10); double was = st.spool; run(st, s, pl, 0, 0, 3); assert(st.spool < was * 0.2); }
+    // Garbage input never produces NaN.
+    { State st; Inputs in; for (auto& p : in.pressure) p = NAN; in.dt = NAN; Step o = step(st, spec(4), in); assert(o.turbine_move == 0 && o.compressor_move == 0);
+      in.dt = 1.0 / 60; o = step(st, spec(4), in); assert(std::isfinite(o.turbine_move) && std::isfinite(o.compressor_move) && std::isfinite(st.spool)); }
+    // Mesh: two housings, mirrored winding on the hot side, scaled to the N x N face, rust paint only on the hot side.
+    std::vector<uint8_t> stock = fake_impeller();
+    assert(build_turbo_mesh(stock, 1, "x").empty() && build_turbo_mesh(std::vector<uint8_t>(10), 3, "x").empty());
+    for (int n = kMinSize; n <= kMaxSize; ++n) {
+        std::vector<uint8_t> mesh = build_turbo_mesh(stock, n, "turbocharger");
+        MeshLayout m; assert(parse_mesh(mesh, m) && m.vertices == 8 && m.indices == 12);
+        std::vector<MeshVertex> v(m.vertices); std::memcpy(v.data(), mesh.data() + m.vertex_bytes + 4, v.size() * sizeof(MeshVertex));
+        uint32_t idx[12]; std::memcpy(idx, mesh.data() + m.index_bytes + 4, sizeof idx);
+        assert(idx[0] == 0 && idx[1] == 1 && idx[2] == 2 && idx[6] == 4 && idx[7] == 6 && idx[8] == 5);
+        double c = (n - 1) * kCell / 2, s = n / 3.0;
+        assert(near(v[0].pos[0], -0.04, 1e-6) && near(v[0].pos[1], c - 0.12 * s, 1e-5) && near(v[2].pos[2], c + 0.12 * s, 1e-5));
+        assert(near(v[4].pos[0], kCell + 0.04, 1e-6) && near(v[4].pos[1], c + 0.12 * s, 1e-5) && near(v[4].normal[0], 1, 1e-6));
+        assert(v[0].rgba[0] == 153 && v[4].rgba[0] == 156 && v[4].rgba[1] == 74 && v[7].rgba[0] == 51);
+        // Cold outlet stub lands in the top cell on the +z face; hot inlet stub in the bottom cell on -z.
+        assert(int(std::lround(v[3].pos[1] / kCell)) == port(n, kColdOut).y && near(v[3].pos[2], (n - 0.5) * kCell, 1e-5));
+        assert(int(std::lround(v[7].pos[1] / kCell)) == port(n, kHotIn).y && near(v[7].pos[2], -0.5 * kCell, 1e-5));
+    }
+    return 0;
+}
