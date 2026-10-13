@@ -57,6 +57,7 @@ constexpr ptrdiff_t component_colors = 136;          // m_colors (array<replicat
 constexpr ptrdiff_t property_modified = 16;          // replication.master.property.m_is_modified (bool)
 constexpr ptrdiff_t property_s32_value = 24;         // property_type_simple<s32>._m_value
 constexpr ptrdiff_t definition_id = 0;               // vehicle_component_definition.m_id (string)
+constexpr ptrdiff_t definition_mesh_static = 224;     // vehicle_component_definition.m_mesh_static (mesh_composite)
 constexpr ptrdiff_t pump_factor_speed = 480;         // gas_pump_centrifugal.m_factor_speed (replicated, drives the client's sound)
 constexpr ptrdiff_t pump_content_0 = 528;            // m_content_0: compressor inlet
 constexpr ptrdiff_t pump_content_1 = 584;            // m_content_1: compressor outlet
@@ -287,7 +288,11 @@ double* valve_setting(ValvePart& v) {
 
 // Starting colours, as indices into the game's colour palette (rom/textures/color_palette.txtr): the meshes mark the
 // turbo's cold and hot housings and each valve's body and cap as paint slots 0 and 1 (turbo_mesh.h).
-constexpr int32_t kPaletteSteel = 81, kPaletteCastIron = 79, kPaletteRed = 33;
+// Starting colours (palette indices into rom/textures/color_palette.txtr, and their colours for the preview).
+constexpr int32_t kPaletteSteel = 81, kPaletteCastIron = 79, kPaletteBrightSteel = 83, kPaletteBrightRed = 36;
+struct StartColours { int32_t slot[2]; uint8_t rgb[2][3]; };
+constexpr StartColours kTurboColours{{kPaletteSteel, kPaletteCastIron}, {{197, 199, 196}, {55, 67, 69}}};
+constexpr StartColours kValveColours{{kPaletteBrightSteel, kPaletteBrightRed}, {{236, 236, 231}, {204, 44, 36}}};
 
 // Gives a newly placed part its starting colours in paint slots 0 and 1. A new part has every slot at the same
 // default; a part that was painted (or whose saved colours are already in) is left alone.
@@ -322,7 +327,7 @@ void hk_create(void* self, void* vehicle) {
         ValvePart& v = g_valves[self];
         v.kind = kind;
         valve_setting(v);
-        default_paint(self, kPaletteSteel, kPaletteRed);
+        default_paint(self, kValveColours.slot[0], kValveColours.slot[1]);
         if (is_blow_off(kind) && g_bov_inline) {
             // Make both gas nodes ask this component which nodes they flood to (hk_flood joins them).
             at<void*>(static_cast<uint8_t*>(self) + off::pump_node_a, off::node_component_flood) = self;
@@ -339,7 +344,7 @@ void hk_create(void* self, void* vehicle) {
     Turbo& t = g_turbos[self];
     if (t.hot) return;
     t.size = n; t.spec = spec(n);
-    default_paint(self, kPaletteSteel, kPaletteCastIron);
+    default_paint(self, kTurboColours.slot[0], kTurboColours.slot[1]);
     t.hot = create_hot_side(self, vehicle);
     static std::atomic<int> logs{8};
     if (logs.fetch_sub(1) > 0 && t.hot)
@@ -1026,6 +1031,34 @@ void install_sound() {
     log(0, "turbo sounds on");
 }
 
+// Placement preview: the editor draws the part with an empty colour list, so every paint slot shows the default
+// grey. For the mod's parts, hand it the colours a new part starts with instead.
+using push_mesh_static_t = void (*)(void*, void*, const void*, const void*, const void*, const void*, const void*, const void*, const void*);
+anymaker::cell_hook h_push_mesh_static;
+struct ColourArray { const uint8_t* buffer; int32_t count, element_size; void* ctor; void* dtor; };   // array<color8>
+void hk_push_mesh_static(void* renderer, void* layers, const void* composite, const void* transform, const void* a, const void* b, const void* c,
+                         const void* d, const void* colours) {
+    auto original = reinterpret_cast<push_mesh_static_t>(h_push_mesh_static.original);
+    const StartColours* start = nullptr;
+    if (composite && colours && anymaker::readable(colours, sizeof(ColourArray)) && static_cast<const ColourArray*>(colours)->count == 0) {
+        std::lock_guard<std::recursive_mutex> lock(g_mutex);
+        int kind = kind_of_definition(static_cast<const uint8_t*>(composite) - off::definition_mesh_static);
+        if (is_valve(kind)) start = &kValveColours;
+        else if (kind >= kMinSize && kind <= kMaxSize) start = &kTurboColours;
+    }
+    if (!start) { original(renderer, layers, composite, transform, a, b, c, d, colours); return; }
+    uint8_t rgba[2][4] = {{start->rgb[0][0], start->rgb[0][1], start->rgb[0][2], 255}, {start->rgb[1][0], start->rgb[1][1], start->rgb[1][2], 255}};
+    ColourArray painted{rgba[0], 2, 4, static_cast<const ColourArray*>(colours)->ctor, static_cast<const ColourArray*>(colours)->dtor};
+    original(renderer, layers, composite, transform, a, b, c, d, &painted);
+}
+void install_preview_colours() {
+    using namespace anymaker::experimental;
+    void** cell = route::cell(bind::push_mesh_static);
+    void* entry = route::function(bind::push_mesh_static);
+    if (!cell || !entry || *cell != entry || !h_push_mesh_static.install(cell, (void*)&hk_push_mesh_static))
+        log(1, "placement preview colours unavailable (cell %d, entry %d); new parts show grey until placed", !!cell, !!entry);
+}
+
 void remove_hooks();
 void install_hooks() {
     using namespace anymaker::experimental;
@@ -1087,6 +1120,7 @@ void install_hooks() {
                 !!tooltip, !!g_component_tooltip, !!g_units_flow, !!g_units_frequency, !!g_units_pressure, !!g_to_pascals, !!g_string_dtor);
         install_inline_valves();
         install_sound();
+        install_preview_colours();
         g_ready = true;
         if (roots > 1) log(0, "the definition functions' route root matched %d times; all matches agreed", roots);
         log(0, "Ready after %d s (server tick %s). Load or start a world to add the Turbo parts (definitions %s).", attempt,
@@ -1096,6 +1130,7 @@ void install_hooks() {
 }
 void remove_hooks() {
     h_client_tick.remove((void*)&hk_client_tick);
+    h_push_mesh_static.remove((void*)&hk_push_mesh_static);
     h_add_definitions.remove((void*)&hk_add_definitions);
     h_flood.remove((void*)&hk_flood);
     h_properties.remove((void*)&hk_properties);

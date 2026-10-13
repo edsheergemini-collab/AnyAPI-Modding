@@ -187,7 +187,7 @@ inline std::vector<uint8_t> build_blow_off_mesh(const std::vector<uint8_t>& stoc
     const double top = rp * 0.85;                                // where the neck leaves the pipe (relative to c0)
     const double hu = large ? 0.75 * u : u;                      // the large pipe leaves less room above it
     const double neck0 = top, neck1 = rp + 0.08 * hu, band1 = neck1 + 0.08 * hu, body1 = band1 + 0.32 * hu, cap1 = body1 + 0.18 * hu;
-    oct(b, 1, axis, rb * 0.62, rb * 0.62, neck0, neck1, kValveIron);
+    oct(b, 1, axis, rb * 0.62, rb * 0.62, neck0, neck1, kValveMid);
     oct(b, 1, axis, rb * 1.1, rb * 1.1, neck1, band1, kValveAlloy);
     oct(b, 1, axis, rb, rb, band1, body1, kValvePaint0);
     oct(b, 1, axis, rb * 1.06, rb * 0.78, body1, cap1, kValvePaint1);
@@ -197,8 +197,8 @@ inline std::vector<uint8_t> build_blow_off_mesh(const std::vector<uint8_t>& stoc
     }
     // the vent trumpet on the +x side
     const double horn_at[3] = {c0, c0 + (band1 + body1) / 2, c0};
-    oct(b, 0, horn_at, rb * 0.42, rb * 0.42, rb * 0.9, rb * 1.25, kValveIron);
-    oct(b, 0, horn_at, rb * 0.48, rb * 0.78, rb * 1.25, rb * 1.75, kValveIron);
+    oct(b, 0, horn_at, rb * 0.42, rb * 0.42, rb * 0.9, rb * 1.25, kValveAlloy);
+    oct(b, 0, horn_at, rb * 0.48, rb * 0.78, rb * 1.25, rb * 1.75, kValveAlloy);
     oct(b, 0, horn_at, rb * 0.6, rb * 0.6, rb * 1.75, rb * 1.76, kValveHole);
     return encode_valve_mesh(stock, m, b, new_name);
 }

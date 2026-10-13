@@ -62,7 +62,8 @@ Two companion parts, in the gas parts with the turbos:
   switch, or build your own logic in a microcontroller (only on a launch, only above some speed). Outputs `flow`
   (L/s) and `pressure` (kPa).
 
-The valves start with a steel body and a red cap; paint the body and the cap separately. The turbo's own `surge`
+The valves start with a bright steel body and a red cap; paint the body and the cap separately. While you place
+a turbo or valve, the preview shows these starting colours. The turbo's own `surge`
 output is 1 while it surges.
 
 ## Sounds
