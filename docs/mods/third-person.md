@@ -2,7 +2,7 @@
 
 > ThirdPerson hooks a game function directly through the [experimental SDK](../../sdk/experimental/README.md),
 > so it only activates on Anymaker 0.1.24 / Steam build 25826614 and turns itself off on any other build.
-> ThirdPerson 0.1.0 requires AnyAPI 0.35.0 or newer on that build; install it from the manager.
+> ThirdPerson 0.1.1 requires AnyAPI 0.35.0 or newer on that build; install it from the manager.
 
 ThirdPerson adds a third-person camera with an adjustable follow distance.
 
@@ -20,6 +20,7 @@ With [AnyHelpers](helpers.md) installed, F5 can be rebound in **Controls → Thi
 | --- | --- | --- |
 | Start in third person | Off | Use third person from the moment the game starts |
 | Follow distance (m) | 4.0 | The distance used when you switch to third person. Alt + wheel changes it until you next apply settings |
+| Steady camera in vehicles | On | While seated, keeps the horizon level and smooths bumps, hills and crashes instead of following the seat exactly |
 
 Without AnyHelpers the mod still works with F5 and a 4 m default distance.
 
@@ -35,6 +36,14 @@ developer flag is set, so the mod sets that flag while you are in third person.
 For the first frames in third person the mod checks the camera's offset against your character's facing. If the
 game's offset points forward it flips the distance; if the game does not move the camera at all, the mod moves it
 back along the view itself. Both cases are written to `anymaker_modding.log`.
+
+## In vehicles
+
+Seated, the game's view turns with the vehicle, so in third person every bump, hill and crash used to throw the
+camera around. With **Steady camera in vehicles** on (the default), ThirdPerson builds a chase camera instead: it
+follows where you look through a short smoothing filter, keeps the horizon level, sits a little higher than your
+head, and gets much calmer while the vehicle is tilted or tumbling. Looking around with the mouse in a vehicle
+therefore has a slight, deliberate lag. On foot nothing changes.
 
 ## Known limits
 
