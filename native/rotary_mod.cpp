@@ -1,0 +1,454 @@
+// Rotary: a stretchable rotary engine, 1 to 4 rotors, in the small engine's footprint, with its own sound.
+//
+// The part is the game's own engine class: the small engine's definition cell for cell (zones, ports, manifolds,
+// gearboxes, engine wheels, oil, coolant, starting at 6 rps), with a generated rotary housing mesh (rotary_mesh.h)
+// and 25% more power per cell. The engine's power, fuel and air use scale with its volume (m_volume, set once in
+// create), so the mod raises that volume by 25% when a rotary is created. Everything else is the stock engine.
+//
+// Sound: on each client, the rotary's stock engine voices (running and power) are silenced and the mod streams its
+// own synthesized exhaust note (rotary_sound.h) into a positional voice, the way Turbo streams its sounds. It reads
+// the engine's replicated speed, load and sound index, so every player with the mod hears the same engine. The
+// knock (when damaged) and leak voices stay stock. The engine's "Sound effect" row picks the port: 0 bridge port,
+// 1 street port, 2 peripheral port. Works next to EngineSound: both hook the engine's client tick and the voice
+// update, and the rotary's voices stay silent whichever mod's hook sits on top.
+//
+// Getting it: tech_tier 3 loot in the "mechanical" group, like the medium engine. Single player / host for now: the
+// definition is added on this game's server and client scene, and every player would need the mod.
+//
+// EXPERIMENTAL. Hooks game functions through the experimental SDK (rotary_bindings.h): Anymaker 0.1.24 / Steam
+// build 25826614 only. First runs are diagnostic: read anymaker_modding.log.
+#define NOMINMAX
+#include <windows.h>
+#include "anyapi_services_v1.h"
+#include "anyapi_experimental.hpp"
+#include "rotary_bindings.h"
+#include "rotary_logic.h"
+#include "rotary_mesh.h"
+#include "rotary_sound.h"
+#include <atomic>
+#include <cstdarg>
+#include <cstdio>
+#include <cstring>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
+
+namespace rotary {
+namespace {
+constexpr const char* kModId = "rotary";
+
+AnyModHostV1 host;
+std::atomic<bool> g_ready{false}, g_stop{false};
+
+void log(int level, const char* fmt, ...) {
+    if (!host.log) return;
+    char buf[640];
+    va_list ap; va_start(ap, fmt); vsnprintf(buf, sizeof buf, fmt, ap); va_end(ap);
+    host.log(uint32_t(level), kModId, buf);
+}
+
+// Reference layouts (metadata, Anymaker 0.1.24).
+namespace off {
+constexpr ptrdiff_t component_id = 64;               // server_scene.vehicle_component.m_id (s32)
+constexpr ptrdiff_t component_definition = 312;      // m_definition (ptr<const vehicle_component_definition>)
+constexpr ptrdiff_t definition_id = 0;               // vehicle_component_definition.m_id (string)
+constexpr ptrdiff_t engine_volume = 1416;            // server_scene.vehicle_component.engine.m_volume (s32)
+constexpr ptrdiff_t client_definition = 176;         // client_scene.vehicle_component.m_definition
+constexpr ptrdiff_t client_extend_z = 152 + 8 + 8;   // m_extend_size (property_vec3_s32): value at +8, z at +8
+constexpr ptrdiff_t client_factor_speed = 464 + 8;   // client engine m_factor_speed's value (f64)
+constexpr ptrdiff_t client_factor_power = 488 + 8;   // m_factor_power's value (f64)
+constexpr ptrdiff_t client_sound_index = 512 + 8;    // _m_sound_index's value (s32)
+constexpr ptrdiff_t client_is_damage = 528 + 8;      // m_is_damage's value (bool)
+constexpr ptrdiff_t voice_operate = 576, voice_power = 592, voice_knock = 608;   // audio_effect_single (leak at 624)
+constexpr ptrdiff_t mat34_t = 72;                    // mat34.t (vec3)
+}  // namespace off
+constexpr int32_t kStoreSystem = 1;                  // file.e_store.system (as GpsPart and Turbo)
+
+template <class T> T& at(void* base, ptrdiff_t offset) { return *reinterpret_cast<T*>(static_cast<uint8_t*>(base) + offset); }
+template <class T> const T& at(const void* base, ptrdiff_t offset) { return *reinterpret_cast<const T*>(static_cast<const uint8_t*>(base) + offset); }
+
+using self_fn_t = void (*)(void* self);
+using string_ctor_t = void (*)(anymaker::gc_string_view*, const char*);
+using get_definition_t = void (*)(const void** ret, const void* container, const anymaker::gc_string_view* id);
+string_ctor_t g_string_ctor;
+get_definition_t g_get_definition;
+
+std::recursive_mutex g_mutex;                        // definition cache (server and main thread)
+std::unordered_map<const void*, bool> g_is_rotary;   // definition pointer -> rotary?
+
+double now_seconds() {
+    static LARGE_INTEGER freq = [] { LARGE_INTEGER f; QueryPerformanceFrequency(&f); return f; }();
+    LARGE_INTEGER t; QueryPerformanceCounter(&t);
+    return double(t.QuadPart) / double(freq.QuadPart);
+}
+
+bool rotary_definition(const void* definition) {
+    if (!definition) return false;
+    std::lock_guard<std::recursive_mutex> lock(g_mutex);
+    auto found = g_is_rotary.find(definition);
+    if (found != g_is_rotary.end()) return found->second;
+    bool yes = false;
+    if (anymaker::readable(static_cast<const uint8_t*>(definition) + off::definition_id, sizeof(anymaker::gc_string_view))) {
+        auto& id = at<anymaker::gc_string_view>(definition, off::definition_id);
+        if (id.data && id.length > 0 && id.length < 64 && anymaker::readable(id.data, size_t(id.length)))
+            yes = is_rotary_id(id.data, size_t(id.length));
+    }
+    g_is_rotary[definition] = yes;
+    return yes;
+}
+const void* definition_at(const void* component, ptrdiff_t offset) {
+    if (!component || !anymaker::readable(static_cast<const uint8_t*>(component) + offset, 8)) return nullptr;
+    return at<const void*>(component, offset);
+}
+
+// ------------------------------------------------------------------------------------- engine create (server)
+// The stock create sets m_volume from the zones; a rotary's goes up by 25%, which raises its power (and the fuel
+// and air it burns) by the same.
+using create_t = void (*)(void* self, void* vehicle);
+anymaker::cell_hook h_create;
+void hk_create(void* self, void* vehicle) {
+    reinterpret_cast<create_t>(h_create.original)(self, vehicle);
+    if (!self || !rotary_definition(definition_at(self, off::component_definition))) return;
+    if (!anymaker::readable(static_cast<uint8_t*>(self) + off::engine_volume, 4)) return;
+    int32_t& volume = at<int32_t>(self, off::engine_volume);
+    int32_t before = volume;
+    volume = boosted_volume(volume);
+    static std::atomic<int> logs{8};
+    if (logs.fetch_sub(1) > 0)
+        log(0, "Rotary created (component %d): volume %d -> %d (%d rotor%s, max power %.1f kW)", at<int32_t>(self, off::component_id), before, volume,
+            before / 36, before / 36 == 1 ? "" : "s", volume * 0.4);
+}
+
+// ------------------------------------------------------------------------------------- part definition
+// GamePath = file.path { e_store m_store; string m_path; } (24 bytes)
+struct GamePath { int32_t store; uint32_t pad; anymaker::gc_string_view path; };
+static_assert(sizeof(GamePath) == 24, "file.path");
+using add_definitions_t = void (*)(void* container, const void* file);
+using file_load_t = void (*)(bool* ret, void* file, const void* path);
+anymaker::cell_hook h_add_definitions;
+self_fn_t g_file_ctor, g_file_dtor;
+file_load_t g_file_load;
+std::string g_json_path;                            // absolute, backslashes
+
+bool write_file(const std::wstring& path, const void* data, size_t size) {
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    DWORD written = 0;
+    bool ok = WriteFile(h, data, DWORD(size), &written, nullptr) && written == size;
+    CloseHandle(h);
+    return ok;
+}
+
+// Writes the three mesh tiles into rom/meshes/components (where the game loads part meshes) and the definition
+// file into "AnyAPI and Modding/Rotary". Without the meshes the rotary uses the small engine's look.
+bool write_definition_file() {
+    HMODULE self = nullptr;
+    wchar_t dll[MAX_PATH]{};
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCWSTR)&write_definition_file, &self) ||
+        !GetModuleFileNameW(self, dll, MAX_PATH)) return false;
+    std::wstring dir(dll);
+    dir = dir.substr(0, dir.find_last_of(L"\\/"));      // ...\AnyAPI and Modding\mods
+    dir = dir.substr(0, dir.find_last_of(L"\\/"));      // ...\AnyAPI and Modding
+    std::wstring game_dir = dir.substr(0, dir.find_last_of(L"\\/"));
+    std::wstring components = game_dir + L"\\rom\\meshes\\components\\";
+    bool meshes = true;
+    size_t vertices = 0;
+    for (int tile = 0; tile < 3; ++tile) {
+        Mesh m = build_tile(tile);
+        vertices += m.v.size();
+        std::string name = tile_name(tile);
+        std::vector<uint8_t> file = encode_mesh(m, name);
+        meshes = write_file(components + std::wstring(name.begin(), name.end()) + L".mesh", file.data(), file.size()) && meshes;
+    }
+    if (!meshes) log(1, "could not write the rotary meshes into rom\\meshes\\components; the rotary uses the small engine's look");
+    else log(0, "rotary meshes written (%zu vertices in 3 tiles)", vertices);
+    dir += L"\\Rotary";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    std::wstring file = dir + L"\\rotary_engine.json";
+    std::string json = definition_json(meshes ? mesh_path() : std::string("meshes/components/engine_block_a_0_0_0.mesh"));
+    bool ok = write_file(file, json.data(), json.size());
+    int n = WideCharToMultiByte(CP_UTF8, 0, file.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    g_json_path.assign(size_t(n > 0 ? n - 1 : 0), '\0');
+    if (n > 1) WideCharToMultiByte(CP_UTF8, 0, file.c_str(), -1, g_json_path.data(), n, nullptr, nullptr);
+    return ok && !g_json_path.empty();
+}
+
+bool already_added(void* container) {
+    if (!g_get_definition || !g_string_ctor) return false;
+    anymaker::gc_string_view s{};
+    g_string_ctor(&s, kDefinitionId);
+    const void* found = nullptr;
+    g_get_definition(&found, container, &s);
+    return found != nullptr;
+}
+
+// Loads our JSON into a fresh vehicle_component_definition_file and hands it to the container. The path's
+// characters must outlive the call ($string_ctor_cstr makes a non-owning view), so they are static. Other mods'
+// hooks (GpsPart, Turbo) may sit under ours on this cell; calling down through them is fine because every mod
+// checks whether its parts are already in the container before adding them.
+bool add_ours(void* container, const std::string& text) {
+    static std::string kept[4];
+    static int next;
+    std::string& chars = kept[next++ % 4];
+    chars = text;
+    GamePath path{kStoreSystem, 0, {}};
+    g_string_ctor(&path.path, chars.c_str());
+    alignas(16) uint8_t file[64]{};
+    g_file_ctor(file);
+    bool ok = false;
+    g_file_load(&ok, file, &path);
+    if (ok) reinterpret_cast<add_definitions_t>(h_add_definitions.original)(container, file);
+    g_file_dtor(file);
+    return ok;
+}
+
+thread_local bool t_adding = false;
+void hk_add_definitions(void* container, const void* file) {
+    reinterpret_cast<add_definitions_t>(h_add_definitions.original)(container, file);
+    if (!t_adding) { std::lock_guard<std::recursive_mutex> lock(g_mutex); g_is_rotary.clear(); }   // definitions may move
+    if (!g_ready.load() || t_adding || !container || already_added(container)) return;
+    t_adding = true;
+    std::string forward = g_json_path;
+    for (char& c : forward) if (c == '\\') c = '/';
+    bool ok = add_ours(container, g_json_path) || add_ours(container, forward);
+    t_adding = false;
+    static std::atomic<int> logs{6};
+    if (logs.fetch_sub(1) > 0) log(ok ? 0 : 2, ok ? "Rotary Engine added to the game's parts (%s)" : "could not load the Rotary definition from %s", g_json_path.c_str());
+}
+
+// ------------------------------------------------------------------------------------- sound (client, main thread)
+namespace audio {
+constexpr uint32_t play_voice_rva = 0x1409e0;       // (effect_3d) application.audio.play_voice (s32 group, vec3, vec3, f64)
+constexpr uint32_t append_rva = 0x141160;           // effect_3d.append_audio_data (takes the buffer's memory)
+constexpr uint32_t set_position_velocity_rva = 0x141140;
+constexpr uint32_t stop_rva = 0x141110;
+constexpr uint32_t reset_rva = 0x141050;            // effect_3d.reset (releases the handle)
+constexpr uint32_t buffer_reset_rva = 0x41c40;      // binary.buffer.reset (allocates with the game's allocator)
+constexpr int32_t kGroupVehicle = 4;                // e_audio_group.vehicle: follows the vehicle volume slider
+constexpr double kRange = 140.0;                    // metres
+constexpr double kLead = 0.08;                      // seconds of sound queued ahead
+}  // namespace audio
+struct GameBuffer { void* data; int32_t size; uint32_t pad; };
+static_assert(sizeof(GameBuffer) == 16, "binary.buffer");
+using play_voice_t = void (*)(void** effect, const int32_t* group, const double* position, const double* velocity, const double* range);
+using effect_fn_t = void (*)(void** effect);
+using effect_append_t = void (*)(void** effect, GameBuffer* buffer);
+using effect_place_t = void (*)(void** effect, const double* position, const double* velocity);
+using buffer_reset_t = void (*)(GameBuffer* buffer, const int32_t* size);
+using world_transform_t = void (*)(double* ret, const void* component);
+using engine_tick_t = void (*)(void* self, void* client, void* vehicle, void* scene, const double* dt);
+using vol_speed_t = void (*)(uint8_t* single, const double* volume, const double* speed, const int32_t* effect, const int32_t* group, const void* pos);
+play_voice_t g_play_voice;
+effect_fn_t g_effect_stop, g_effect_reset;
+effect_append_t g_effect_append;
+effect_place_t g_effect_place;
+buffer_reset_t g_buffer_reset;
+world_transform_t g_world_transform;
+anymaker::cell_hook h_client_tick, h_vol_speed;
+bool g_voices_hooked = false;                        // the voice update hook is in: the game's own voice says when it runs
+
+struct ClientEngine {
+    void* effect = nullptr;                          // application.audio.effect_3d (a handle)
+    Synth synth;
+    double start = 0, last_tick = 0, retry_at = 0;
+    long long written = 0;                           // samples queued since start
+    double position[3]{}, velocity[3]{};
+    bool placed = false;
+    double game_volume = 0;                          // the stock power voice's volume this tick (> 0 while it runs)
+    bool game_volume_seen = false;
+    int logged_rotors = 0;
+};
+std::unordered_map<const void*, ClientEngine> g_engines;   // keyed by client component
+std::vector<int16_t> g_pcm;
+double g_last_sweep = 0;
+thread_local uint8_t* t_rotary;                       // rotary whose client tick is running on this thread
+
+void release_voice(ClientEngine& e) {
+    if (!e.effect) return;
+    g_effect_stop(&e.effect);
+    g_effect_reset(&e.effect);
+    e.effect = nullptr;
+}
+
+// The rotary's stock running and power voices are silenced (a zero-volume update ends a game voice); knock while
+// damaged and leak pass through. The power voice's volume is kept: it says the engine is firing.
+void hk_vol_speed(uint8_t* single, const double* volume, const double* speed, const int32_t* effect, const int32_t* group, const void* pos) {
+    auto original = reinterpret_cast<vol_speed_t>(h_vol_speed.original);
+    uint8_t* e = t_rotary;
+    if (!e || !single || !volume) return original(single, volume, speed, effect, group, pos);
+    ptrdiff_t o = single - e;
+    if (o != off::voice_operate && o != off::voice_power && o != off::voice_knock) return original(single, volume, speed, effect, group, pos);
+    if (o == off::voice_power) {
+        auto found = g_engines.find(e);
+        if (found != g_engines.end()) { found->second.game_volume = *volume; found->second.game_volume_seen = true; }
+    }
+    if (o == off::voice_knock && at<uint8_t>(e, off::client_is_damage)) return original(single, volume, speed, effect, group, pos);
+    double zero = 0;
+    original(single, &zero, speed, effect, group, pos);
+}
+
+void stream_sound(void* self, const double* dt) {
+    double now = now_seconds();
+    ClientEngine& v = g_engines[self];
+    v.last_tick = now;
+    Input in;
+    in.rps = factor_to_rps(at<double>(self, off::client_factor_speed));
+    in.load = at<double>(self, off::client_factor_power);
+    in.rotors = rotors_from_extend(at<int32_t>(self, off::client_extend_z));
+    in.port = port_from_index(at<int32_t>(self, off::client_sound_index));
+    // Firing: the game's power voice is audible. Without the voice hook, assume it fires at start speed or above.
+    in.running = g_voices_hooked && v.game_volume_seen ? v.game_volume > 0.001 : in.rps >= kStartRps;
+    v.game_volume_seen = false;
+    if (v.logged_rotors != in.rotors) {
+        static std::atomic<int> logs{12};
+        if (logs.fetch_sub(1) > 0) log(0, "rotary sound: %d rotor%s (extend z %d), %s", in.rotors, in.rotors == 1 ? "" : "s", at<int32_t>(self, off::client_extend_z), port_name(in.port));
+        v.logged_rotors = in.rotors;
+    }
+    double matrix[12]{};
+    g_world_transform(matrix, self);
+    const double* p = matrix + off::mat34_t / 8;
+    double step = dt && std::isfinite(*dt) && *dt > 1e-4 ? *dt : 1.0 / 60.0;
+    if (std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2])) {
+        for (int i = 0; i < 3; ++i) {
+            double vel = v.placed ? (p[i] - v.position[i]) / step : 0.0;
+            vel = std::max(-150.0, std::min(150.0, vel));
+            v.velocity[i] += (vel - v.velocity[i]) * 0.2;   // frame-to-frame jitter would wobble the pitch
+            v.position[i] = p[i];
+        }
+        v.placed = true;
+    }
+    bool audible = in.rps > 0.3 || v.synth.rps > 0.3 || v.synth.time < v.synth.crackle_until;
+    if (!v.effect) {
+        if (!audible || now < v.retry_at || !v.placed) return;
+        int32_t group = audio::kGroupVehicle; double range = audio::kRange;
+        g_play_voice(&v.effect, &group, v.position, v.velocity, &range);
+        if (!v.effect) {
+            v.retry_at = now + 1.0;
+            static std::atomic<int> logs{3};
+            if (logs.fetch_sub(1) > 0) log(1, "the game gave no voice for a rotary's sound; retrying");
+            return;
+        }
+        static std::atomic<int> logs{4};
+        if (logs.fetch_sub(1) > 0) log(0, "rotary voice started (%.1f rps, %s)", in.rps, in.running ? "firing" : "cranking");
+        v.start = now; v.written = 0;
+    }
+    g_effect_place(&v.effect, v.position, v.velocity);
+    // Keep about kLead seconds queued. After a stall (a pause, a hitch) the queue ran dry: start again from now.
+    long long played = (long long)((now - v.start) * kSampleRate);
+    if (v.written < played) v.written = played;
+    long long want = played + (long long)(audio::kLead * kSampleRate) - v.written;
+    if (want <= 0) return;
+    int n = int(std::min<long long>(want, kSampleRate / 5));
+    g_pcm.resize(size_t(n));
+    render(v.synth, in, g_pcm.data(), n);
+    GameBuffer buffer{nullptr, 0, 0};
+    int32_t bytes = n * 2;
+    g_buffer_reset(&buffer, &bytes);
+    if (!buffer.data || buffer.size != bytes) return;
+    std::memcpy(buffer.data, g_pcm.data(), size_t(bytes));
+    g_effect_append(&v.effect, &buffer);
+    if (buffer.data) { int32_t zero = 0; g_buffer_reset(&buffer, &zero); }   // the effect refused it (queue full)
+    v.written += n;
+}
+
+void hk_client_tick(void* self, void* client, void* vehicle, void* scene, const double* dt) {
+    auto original = reinterpret_cast<engine_tick_t>(h_client_tick.original);
+    if (!self || !rotary_definition(definition_at(self, off::client_definition))) return original(self, client, vehicle, scene, dt);
+    uint8_t* prev = t_rotary;
+    t_rotary = static_cast<uint8_t*>(self);
+    g_engines[self];                                 // so the voice hook can record this tick's power volume
+    original(self, client, vehicle, scene, dt);
+    t_rotary = prev;
+    stream_sound(self, dt);
+    double now = now_seconds();
+    if (now - g_last_sweep > 1.0) {                  // engines gone from the scene stop ticking: free their voices
+        g_last_sweep = now;
+        for (auto it = g_engines.begin(); it != g_engines.end();)
+            if (now - it->second.last_tick > 1.0) { release_voice(it->second); it = g_engines.erase(it); }
+            else ++it;
+    }
+}
+
+// ------------------------------------------------------------------------------------- install (background thread)
+// Sound is optional: without it the rotary sounds like the stock engine.
+void install_sound() {
+    using namespace anymaker::experimental;
+    void** tick = hook_cell(bind::client_engine_tick);
+    void** vol = hook_cell(bind::effect_update_play_volume_speed);
+    g_world_transform = reinterpret_cast<world_transform_t>(function(bind::client_get_world_transform));
+    g_play_voice = reinterpret_cast<play_voice_t>(native(audio::play_voice_rva));
+    g_effect_append = reinterpret_cast<effect_append_t>(native(audio::append_rva));
+    g_effect_place = reinterpret_cast<effect_place_t>(native(audio::set_position_velocity_rva));
+    g_effect_stop = reinterpret_cast<effect_fn_t>(native(audio::stop_rva));
+    g_effect_reset = reinterpret_cast<effect_fn_t>(native(audio::reset_rva));
+    g_buffer_reset = reinterpret_cast<buffer_reset_t>(native(audio::buffer_reset_rva));
+    bool found = tick && vol && g_world_transform && g_play_voice && g_effect_append && g_effect_place && g_effect_stop && g_effect_reset && g_buffer_reset;
+    if (!found) {
+        log(1, "rotary sound unavailable (client tick %d, voice update %d, transform %d, audio %d/%d/%d/%d/%d/%d); rotaries keep the stock engine sound",
+            !!tick, !!vol, !!g_world_transform, !!g_play_voice, !!g_effect_append, !!g_effect_place, !!g_effect_stop, !!g_effect_reset, !!g_buffer_reset);
+        return;
+    }
+    // The voice hook goes in first: once the tick hook is in, rotaries stream their own sound and need the stock
+    // voices silenced.
+    g_voices_hooked = h_vol_speed.install(vol, (void*)&hk_vol_speed);
+    if (!g_voices_hooked) { log(1, "voice update hook not installed; rotaries keep the stock engine sound"); return; }
+    if (!h_client_tick.install(tick, (void*)&hk_client_tick)) {
+        h_vol_speed.remove((void*)&hk_vol_speed);
+        g_voices_hooked = false;
+        log(1, "engine client tick hook not installed; rotaries keep the stock engine sound");
+        return;
+    }
+    log(0, "rotary sound on");
+}
+
+void install_hooks() {
+    using namespace anymaker::experimental;
+    for (int attempt = 0; attempt < 180 && !g_stop; ++attempt) {
+        if (attempt) Sleep(1000);
+        if (!matching_build()) { if (attempt == 0) log(1, "game build does not match the SDK reference; Rotary stays off"); return; }
+        void** add = hook_cell(bind::definitions_add_definitions);
+        void** create = hook_cell(bind::engine_create);
+        auto fctor = reinterpret_cast<self_fn_t>(function(bind::definition_file_ctor));
+        auto fdtor = reinterpret_cast<self_fn_t>(function(bind::definition_file_dtor));
+        auto fload = reinterpret_cast<file_load_t>(function(bind::definition_file_load));
+        auto sc = reinterpret_cast<string_ctor_t>(native(anymaker::sym::string_ctor_cstr_rva));
+        bool core = add && create && fctor && fdtor && fload && sc;
+        if (!core) {
+            if (attempt == 179)
+                log(2, "could not locate the game functions (add=%d create=%d file=%d/%d/%d string=%d)", !!add, !!create, !!fctor, !!fdtor, !!fload, !!sc);
+            continue;
+        }
+        g_file_ctor = fctor; g_file_dtor = fdtor; g_file_load = fload; g_string_ctor = sc;
+        g_get_definition = reinterpret_cast<get_definition_t>(function(bind::definitions_get_by_id));
+        if (!g_get_definition) log(1, "definition lookup not found; Rotary may add its part twice if another mod re-adds definitions");
+        if (!write_definition_file()) { log(2, "could not write the Rotary definition file; Rotary is off"); return; }
+        if (!h_create.install(create, (void*)&hk_create))
+            log(1, "engine create hook not installed; rotaries make the small engine's power");
+        if (!h_add_definitions.install(add, (void*)&hk_add_definitions)) { log(2, "the definitions hook cell was already taken or not writable; Rotary is off"); h_create.remove((void*)&hk_create); return; }
+        install_sound();
+        g_ready = true;
+        log(0, "Ready after %d s. Load or start a world to add the Rotary Engine (definition %s).", attempt, g_json_path.c_str());
+        return;
+    }
+}
+void remove_hooks() {
+    h_client_tick.remove((void*)&hk_client_tick);
+    h_vol_speed.remove((void*)&hk_vol_speed);
+    h_add_definitions.remove((void*)&hk_add_definitions);
+    h_create.remove((void*)&hk_create);
+}
+}  // namespace
+}  // namespace rotary
+
+using namespace rotary;
+extern "C" __declspec(dllexport) bool AnyAPI_ModInit(const AnyModHostV1* h, AnyModCallbacksV1* out) {
+    if (!h || !out || h->struct_size != sizeof(*h) || h->abi != ANYAPI_MOD_ABI || out->struct_size != sizeof(*out)) return false;
+    host = *h; out->id = kModId;
+    out->shutdown = [](void*) { g_stop = true; remove_hooks(); };
+    return true;
+}
+extern "C" __declspec(dllexport) void AnyAPI_ModReady() {
+    std::thread(install_hooks).detach();   // resolving scans game memory; keep it off the loader and frame threads
+}
