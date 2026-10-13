@@ -622,40 +622,9 @@ void hk_properties(void* self, void* properties) {
     if (logs.fetch_sub(1) > 0) log(0, "blow-off valve spring and sound rows added (%.0f kPa, sound %.0f)", setting[0], setting[1]);
 }
 
-// Saves: the game reads and writes a component's save data with the same parse calls, so the blow-off valve adds
-// two values after the impeller's own. Missing values (a valve saved before this) read as the defaults.
-using parse_save_t = void (*)(void* self, void* parser);
-using parse_f64_t = void (*)(void* parser, const anymaker::gc_string_view* name, double* value, const double* fallback);
-anymaker::cell_hook h_parse_save;
-parse_f64_t g_parse_f64;
-
-void hk_parse_save(void* self, void* parser) {
-    reinterpret_cast<parse_save_t>(h_parse_save.original)(self, parser);
-    if (!self || !parser || !g_parse_f64 || !g_string_dtor) return;
-    double* setting = nullptr;
-    {
-        std::lock_guard<std::recursive_mutex> lock(g_mutex);
-        int kind = part_kind(self);
-        if (!is_blow_off(kind)) return;
-        ValvePart& v = g_valves[self];
-        v.kind = kind;
-        setting = valve_setting(v);
-    }
-    if (!setting) return;
-    const char* names[2] = {"turbo_bov_spring_kpa", "turbo_bov_sound"};
-    const double fallback[2] = {kBlowOffDefaultKpa, double(kWhoosh)};
-    for (int i = 0; i < 2; ++i) {
-        anymaker::gc_string_view name{};
-        g_string_ctor(&name, names[i]);
-        g_parse_f64(parser, &name, &setting[i], &fallback[i]);
-        g_string_dtor(&name);
-        if (!std::isfinite(setting[i])) setting[i] = fallback[i];
-    }
-    setting[0] = std::max(0.0, std::min(kBlowOffMaxKpa, setting[0]));
-    setting[1] = std::max(0.0, std::min(double(kBlowOffSoundCount - 1), std::round(setting[1])));
-    static std::atomic<int> logs{6};
-    if (logs.fetch_sub(1) > 0) log(0, "blow-off valve save data: spring %.0f kPa, sound %.0f", setting[0], setting[1]);
-}
+// Not saved: the save data is binary and read by position, so values added after the impeller's own shift every
+// field after them and broke the tile save in a 0.1.25 test (a crash in the creature_location vector). The valve's
+// spring and sound reset to the defaults when the vehicle loads.
 
 // ------------------------------------------------------------------------------------- part definitions
 // GamePath = file.path { e_store m_store; string m_path; } (24 bytes)
@@ -1016,10 +985,6 @@ void install_hooks() {
         void** properties = route::cell(bind::centrifugal_get_properties);
         if (!properties || !h_properties.install(properties, (void*)&hk_properties))
             log(1, "blow-off valve spring setting unavailable (Properties Tool hook not found); it stays at %.0f kPa", kBlowOffDefaultKpa);
-        void** parse = route::cell(bind::centrifugal_parse_save_data);
-        g_parse_f64 = reinterpret_cast<parse_f64_t>(route::function(bind::parser_parse_f64));
-        if (!parse || !g_parse_f64 || !g_string_dtor || !h_parse_save.install(parse, (void*)&hk_parse_save))
-            log(1, "blow-off valve settings won't be saved (save hook %d, parse %d)", !!parse, !!g_parse_f64);
         if (!tooltip_ok || !h_tooltip.install(tooltip, (void*)&hk_tooltip))
             log(1, "turbo tooltip unavailable (tooltip=%d base=%d units=%d/%d/%d pascals=%d string=%d); turbos show the stock impeller tooltip",
                 !!tooltip, !!g_component_tooltip, !!g_units_flow, !!g_units_frequency, !!g_units_pressure, !!g_to_pascals, !!g_string_dtor);
@@ -1037,7 +1002,6 @@ void remove_hooks() {
     h_add_definitions.remove((void*)&hk_add_definitions);
     h_flood.remove((void*)&hk_flood);
     h_properties.remove((void*)&hk_properties);
-    h_parse_save.remove((void*)&hk_parse_save);
     h_tooltip.remove((void*)&hk_tooltip);
     h_get_f64.remove((void*)&hk_get_f64);
     h_tick.remove((void*)&hk_tick);

@@ -50,7 +50,7 @@ Two companion parts, in the gas parts with the turbos:
   higher than the turbo can hold; the valve vents it through its red cap, so the turbo keeps its spin. Without
   one the compressor **surges**: the boost pushes back through it and the turbo loses speed fast. Properties
   Tool: **Stiffness** (0-50 kPa, default 5), the extra boost it waits for before opening (a stiff spring lets
-  some surge through), and **Sound effect** (see Sounds below); both are saved with the vehicle. The large valve
+  some surge through), and **Sound effect** (see Sounds below); they reset to the defaults when the vehicle loads (the game's binary save format has no room for extra values). The large valve
   vents 2.5 times faster. Outputs `open` (0/1), `flow` (L/s) and `pressure` (kPa).
 - **Turbo Wastegate.** Put it between the exhaust manifold (bottom port) and a vent or the turbo's exhaust outlet
   pipe (top port). Its `open` input (0 to 1, from a data link or microcontroller) lets exhaust bypass the turbine,
