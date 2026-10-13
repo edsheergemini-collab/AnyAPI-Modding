@@ -96,8 +96,10 @@ struct Character {
 inline Character character(int size) {
     switch (size) {
     case 2: return {2400, 7400, 2.0, 0.10, 0.05, 6500, 0.14, 1.30, 22, 11, 0.022, 1.00};
-    case 4: return {1050, 4400, 1.5, 0.12, 0.16, 4200, 0.18, 0.80, 15, 7.5, 0.036, 1.35};
-    case 5: return { 750, 3300, 1.5, 0.14, 0.24, 3400, 0.22, 0.62, 12, 6, 0.045, 1.50};
+    // Nate's ears (2026-10-13): the big ones were too deep. The 4x4 sits halfway between the 3x3 and the old
+    // 4x4, and the 5x5 just past the old 4x4.
+    case 4: return {1275, 5000, 1.5, 0.10, 0.13, 4700, 0.17, 0.90, 16.5, 8.25, 0.032, 1.28};
+    case 5: return { 945, 4015, 1.5, 0.127, 0.19, 3920, 0.19, 0.74, 14, 7, 0.039, 1.40};
     default: return {1500, 5600, 1.5, 0.08, 0.10, 5200, 0.16, 1.00, 18, 9, 0.028, 1.20};
     }
 }
@@ -128,8 +130,8 @@ struct Synth {
 inline void render(Synth& s, double level, bool flag, int16_t* out, int n) {
     const Character c = character(s.size);
     // A blow-off valve on a bigger turbo dumps more air: lower, longer and, for the flutter, slower.
-    const double bov_pitch = s.size <= 2 ? 1.25 : s.size == 4 ? 0.82 : s.size >= 5 ? 0.68 : 1.0;
-    const double bov_length = s.size <= 2 ? 0.75 : s.size == 4 ? 1.25 : s.size >= 5 ? 1.5 : 1.0;
+    const double bov_pitch = s.size <= 2 ? 1.25 : s.size == 4 ? 0.91 : s.size >= 5 ? 0.77 : 1.0;
+    const double bov_length = s.size <= 2 ? 0.75 : s.size == 4 ? 1.12 : s.size >= 5 ? 1.34 : 1.0;
     if (!s.init || s.tuned_size != s.size) {
         s.hiss.set(c.hiss_hz, 0.9); s.click.set(6500.0, 0.7);
         s.whoosh.set(3600.0 * bov_pitch, 0.7); s.whoosh_low.set(1400.0 * bov_pitch, 0.8); s.rumble.set(500.0 * bov_pitch, 0.8);
