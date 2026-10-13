@@ -196,7 +196,7 @@ function(anyapi_version_resource target product)
   elseif(target STREQUAL "GpsPart")
     set(ANYAPI_VERSION_COMMA "1,0,1,0")
     set(ANYAPI_VERSION_TEXT "1.0.1")
-  elseif(target STREQUAL "Turbo")
+  elseif(target STREQUAL "AnyEngineParts")
     set(ANYAPI_VERSION_COMMA "0,1,0,0")
     set(ANYAPI_VERSION_TEXT "0.1.0")
   elseif(target STREQUAL "ThirdPerson")
@@ -468,11 +468,12 @@ add_executable(gpspart_logic_test tests/gpspart_logic_test.cpp)
 target_compile_options(gpspart_logic_test PRIVATE /UNDEBUG /EHsc /utf-8)
 add_test(NAME gpspart_logic COMMAND gpspart_logic_test)
 
-# Turbo: exhaust-driven turbochargers (2x2x2 to 5x5x2) built from the stock impeller, through the experimental SDK.
-add_library(Turbo SHARED turbo_mod.cpp)
-target_include_directories(Turbo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../sdk/experimental/include")
-target_compile_options(Turbo PRIVATE /W3 /EHsc /utf-8)
-anyapi_version_resource(Turbo Turbo)
+# AnyEngineParts: turbochargers, blow-off valves and wastegate (turbo_*) and the rotary engine (rotary_*) in one DLL,
+# through the experimental SDK.
+add_library(AnyEngineParts SHARED engine_parts_mod.cpp turbo_mod.cpp rotary_mod.cpp)
+target_include_directories(AnyEngineParts PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../sdk/experimental/include")
+target_compile_options(AnyEngineParts PRIVATE /W3 /EHsc /utf-8)
+anyapi_version_resource(AnyEngineParts AnyEngineParts)
 add_executable(turbo_logic_test tests/turbo_logic_test.cpp)
 target_compile_options(turbo_logic_test PRIVATE /UNDEBUG /EHsc /utf-8)
 add_test(NAME turbo_logic COMMAND turbo_logic_test)
@@ -482,6 +483,10 @@ add_library(ThirdPerson SHARED thirdperson_mod.cpp)
 target_include_directories(ThirdPerson PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../sdk/experimental/include")
 target_compile_options(ThirdPerson PRIVATE /W3 /EHsc /utf-8)
 anyapi_version_resource(ThirdPerson ThirdPerson)
+
+add_executable(rotary_logic_test tests/rotary_logic_test.cpp)
+target_compile_options(rotary_logic_test PRIVATE /UNDEBUG /EHsc /utf-8)
+add_test(NAME rotary_logic COMMAND rotary_logic_test)
 
 # Public experimental SDK: compile all generated layouts and opt-in examples.
 add_executable(experimental_sdk_test tests/experimental_sdk_test.cpp)

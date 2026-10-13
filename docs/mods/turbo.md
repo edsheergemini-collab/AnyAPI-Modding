@@ -1,8 +1,8 @@
-# Turbo
+# Turbo (AnyEngineParts)
 
-> Turbo hooks game functions directly through the [experimental SDK](../../sdk/experimental/README.md),
+> The turbo parts are part of [AnyEngineParts](engine-parts.md). They hook game functions directly through the [experimental SDK](../../sdk/experimental/README.md),
 > so it only activates on Anymaker 0.1.25 / Steam build 25904830 and turns itself off on any other build.
-> Turbo 0.1.0 is a prototype: it needs AnyAPI 0.37.0 or newer on that build. **Single player only** for now.
+> AnyEngineParts 0.1.0 is a prototype: it needs AnyAPI 0.37.0 or newer on that build. **Single player only** for now.
 
 Turbo adds four exhaust-driven turbochargers: **Turbo 2x2**, **3x3**, **4x4** and **5x5**. Each is N cells wide,
 N tall and 2 thick. The front cell is the stock impeller's compressor housing in polished steel, scaled to the size; the back
@@ -131,8 +131,8 @@ Wire them from a data port, a data link or a microcontroller. Pressures use the 
   it synthesizes 48 kHz audio ([`turbo_sound.h`](../../native/turbo_sound.h)) and streams it into a positional
   voice effect, the way the game plays voice chat. If the hooks are not found, the parts keep the hum.
 - The hot side's gas is not saved; it refills from the pipes after loading. Saves that contain a turbo need
-  Turbo installed to load it.
+  AnyEngineParts installed to load it.
 
-Source: [`turbo_mod.cpp`](../../native/turbo_mod.cpp), bindings in
+Source: [`turbo_mod.cpp`] (built into `AnyEngineParts.dll`)(../../native/turbo_mod.cpp), bindings in
 [`turbo_bindings.h`](../../native/turbo_bindings.h), tests in
 [`tests/turbo_logic_test.cpp`](../../native/tests/turbo_logic_test.cpp).

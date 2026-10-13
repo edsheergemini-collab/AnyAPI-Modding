@@ -1030,15 +1030,9 @@ void remove_hooks() {
     h_destroy.remove((void*)&hk_destroy);
 }
 }  // namespace
-}  // namespace turbo
 
-using namespace turbo;
-extern "C" __declspec(dllexport) bool AnyAPI_ModInit(const AnyModHostV1* h, AnyModCallbacksV1* out) {
-    if (!h || !out || h->struct_size != sizeof(*h) || h->abi != ANYAPI_MOD_ABI || out->struct_size != sizeof(*out)) return false;
-    host = *h; out->id = kModId;
-    out->shutdown = [](void*) { g_stop = true; remove_hooks(); };
-    return true;
-}
-extern "C" __declspec(dllexport) void AnyAPI_ModReady() {
-    std::thread(install_hooks).detach();   // resolving scans game memory; keep it off the loader and frame threads
-}
+// AnyEngineParts (engine_parts_mod.cpp) is the DLL; it starts this part of it.
+void init(const AnyModHostV1& h) { host = h; }
+void start() { install_hooks(); }       // on AnyEngineParts' install thread
+void shutdown() { g_stop = true; remove_hooks(); }
+}  // namespace turbo
