@@ -113,7 +113,7 @@ int main(int argc, char** argv) {
         assert(crank.rms > 0.002 && run.rms > crank.rms * 2 && run.peak < 0.99);
         std::vector<int16_t> pull = scenario(10.5, 2, kBridgePort, sweep);
         Level top = level(pull, size_t(6.0 * kSampleRate), size_t(7.5 * kSampleRate));
-        assert(top.rms > level(pull, 0, 2 * kSampleRate).rms && top.peak < 0.995);
+    assert(top.rms > level(pull, 0, 2 * kSampleRate).rms && top.peak < 0.995);
         for (int16_t v : pull) assert(v > -32000 && v < 32000);
     }
 
