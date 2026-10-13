@@ -436,6 +436,35 @@ void install_sound() {
     log(0, "rotary sound on");
 }
 
+// Identity checks for the definition functions, from their first code bytes (Anymaker 0.1.24 and 0.1.25 alike).
+// Laptop round 3 (2026-10-13): one session's hook landed on vehicle_component_definition_container.load instead of
+// _add_definitions, so the game was handed Rotary's definition file as a file path and crashed. Before hooking, the
+// cells are now checked: the add cell must hold _add_definitions (or another mod's hook on it, which lives in a mod
+// DLL), never container.load, and the load cell must hold vehicle_component_definition_file.load.
+constexpr const char* kSigAddDefinitions = "53 48 81 ec 90 00 00 00 48 89 4c 24 48 48 89 54 24 50 48 8b 44 24 28 48 89 44 24 58";
+constexpr const char* kSigContainerLoad = "53 48 81 ec a0 00 00 00 48 89 4c 24 40 48 89 54 24 48 48 8d 01 48 8b 1d";
+constexpr const char* kSigFileLoad = "53 55 48 81 ec 98 00 00 00 48 89 4c 24 48 48 89 54 24 50 4c 89 44 24 58";
+bool code_is(const void* fn, const char* sig) {
+    anymaker::pattern pat(sig);
+    return fn && !pat.bytes.empty() && anymaker::readable(fn, pat.bytes.size()) && pat.match(static_cast<const uint8_t*>(fn));
+}
+// A function inside a loaded DLL other than the game: another mod's hook sitting on the cell.
+bool in_other_module(const void* fn) {
+    HMODULE m = nullptr;
+    return fn && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCWSTR)fn, &m) &&
+           m && m != GetModuleHandleW(nullptr);
+}
+bool add_cell_ok(void** cell) {
+    void* fn = cell && anymaker::readable(cell, 8) ? *cell : nullptr;
+    if (!fn || code_is(fn, kSigContainerLoad) || code_is(fn, kSigFileLoad)) return false;
+    return code_is(fn, kSigAddDefinitions) || in_other_module(fn);
+}
+bool load_fn_ok(void* fn) { return code_is(fn, kSigFileLoad); }
+const char* what_is(const void* fn) {
+    return !fn ? "nothing" : code_is(fn, kSigAddDefinitions) ? "_add_definitions" : code_is(fn, kSigContainerLoad) ? "container.load"
+         : code_is(fn, kSigFileLoad) ? "file.load" : in_other_module(fn) ? "another mod's hook" : "unknown code";
+}
+
 void install_hooks() {
     using namespace anymaker::experimental;
     // Each lookup scans the game's code, so what is found is kept and only the rest is looked up again; after the
@@ -453,6 +482,16 @@ void install_hooks() {
         if (!fdtor) fdtor = reinterpret_cast<self_fn_t>(function(bind::definition_file_dtor));
         if (!load_cell) load_cell = route_cell(bind::definition_file_load);
         if (!fload && load_cell) fload = reinterpret_cast<file_load_t>(*load_cell);
+        if (add && !add_cell_ok(add)) {
+            static int logs = 3;
+            if (logs-- > 0) log(1, "the definitions route led to %s, not _add_definitions; looking again", what_is(*add));
+            add = nullptr;
+        }
+        if (fload && !load_fn_ok((void*)fload)) {
+            static int logs = 3;
+            if (logs-- > 0) log(1, "the file load route led to %s, not vehicle_component_definition_file.load; looking again", what_is((void*)fload));
+            fload = nullptr; load_cell = nullptr;
+        }
         if (!sc) sc = reinterpret_cast<string_ctor_t>(native(anymaker::sym::string_ctor_cstr_rva));
         bool core = add && create && fctor && fdtor && fload && sc;
         if (!core) {
@@ -466,6 +505,7 @@ void install_hooks() {
         if (!write_definition_file()) { log(2, "could not write the Rotary definition file; Rotary is off"); return; }
         if (!h_create.install(create, (void*)&hk_create))
             log(1, "engine create hook not installed; rotaries make the small engine's power");
+        if (!add_cell_ok(add)) { log(2, "the definitions hook cell changed to %s before hooking; Rotary is off", what_is(*add)); h_create.remove((void*)&hk_create); return; }
         if (!h_add_definitions.install(add, (void*)&hk_add_definitions)) { log(2, "the definitions hook cell was already taken or not writable; Rotary is off"); h_create.remove((void*)&hk_create); return; }
         install_sound();
         g_ready = true;
