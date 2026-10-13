@@ -487,12 +487,12 @@ inline std::string air_filter_entry(bool large, const std::string& mesh) {
 }
 inline std::string air_filter_mesh_path(bool large) { return std::string("meshes/components/turbo_") + (large ? kAirFilterLargeId : kAirFilterId) + ".mesh"; }
 
-// Intercooler: stretches like the stock radiator (wider along x, taller in whole cells along y) and, like it, has no
+// Intercooler: grows like the stock radiator (wider in whole cells along x, its end tanks staying put; taller along y) and, like it, has no
 // pipes of its own: gas ports snap onto any face, small or large. It is a stock gas tank underneath (class gas_tank),
 // so every port on it shares one volume of air and the boost passes through; the turbo feeding it works out how much
 // heat it takes out (turbo_health.h).
 inline std::string intercooler_mesh_path(int tile = 0) {
-    return std::string("meshes/components/turbo_") + kIntercoolerId + "_0_" + std::to_string(tile) + "_0.mesh";
+    return std::string("meshes/components/turbo_") + kIntercoolerId + "_" + std::to_string(tile) + "_0_0.mesh";
 }
 inline std::string intercooler_entry(bool built) {
     std::string description = std::string("Air-to-air intercooler for a Turbo. Snap gas ports onto it (small or large) like a radiator: one for "
@@ -516,8 +516,9 @@ inline std::string intercooler_entry(bool built) {
         "      \"logic_nodes\": [],\n" +
         "      \"mesh_static\": {\"mesh_path\": \"" + (built ? intercooler_mesh_path() : std::string("meshes/components/radiator_a_0_0_0.mesh")) + "\"},\n" +
         "      \"meshes_dynamic\": [],\n" +
-        "      \"mode_x\": \"stretch\",\n" +
-        "      \"mode_y\": \"tile\",\n" +
+        // without our tiles, fall back on the radiator's look and its own layout (its tiles run along y)
+        "      \"mode_x\": \"" + (built ? "tile" : "stretch") + "\",\n" +
+        "      \"mode_y\": \"" + (built ? "stretch" : "tile") + "\",\n" +
         "      \"interval\": [1, 1, 0],\n" +
         "      \"center_stretch\": [0.0, 0.5, 0.0],\n" +
         "      \"category\": \"gas\",\n" +

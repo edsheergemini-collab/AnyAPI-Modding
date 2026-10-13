@@ -4,10 +4,11 @@
 //   air filter, small: 1 cell, small pipe; large: 2 x 2 x 2 cells, large pipe. The neck goes down to the gas node
 //     (direction 2), then a clamp band, a base cap, a pleated cone element (first colour) and a top cap (second
 //     colour) with a bright badge.
-//   intercooler: three tiles the game strings together along y like the radiator's (radiator_a_0_<y>_0): tile 0 the
-//     bottom cell (bottom tank), tile 1 one cell of core (repeated per extra height), tile 2 the top cell (top tank).
-//     Each tile is 3 cells wide (x -1..1, which the game stretches) and one cell deep, modelled around its own cell at
-//     y = 0. No ports: the player snaps gas ports on, as on the radiator. Tanks take the first colour, end caps the second.
+//   intercooler: three tiles the game strings together along x (turbo_intercooler_<x>_0_0): tile 0 the left cell
+//     (left end tank), tile 1 one cell of core (repeated per extra width), tile 2 the right cell (right end tank). Each
+//     tile is one cell wide, 2 cells tall (y 0..1, which the game stretches) and one cell deep, modelled around its own
+//     cell at x = 0, so the tanks keep their width however wide it gets. No ports: the player snaps gas ports on, as on
+//     the radiator. Tanks take the first colour, their caps the second.
 #include "turbo_valve_mesh.h"
 
 namespace turbo {
@@ -64,37 +65,36 @@ inline std::vector<uint8_t> build_air_filter_mesh(const std::vector<uint8_t>& st
     return encode_valve_mesh(stock, m, b, new_name);
 }
 
-// Builds one intercooler tile (0 bottom, 1 middle, 2 top). No ports: gas ports snap onto its faces.
+// Builds one intercooler tile (0 left end, 1 middle, 2 right end). Like a car's: an end tank on each side and the
+// core between them, its tubes running across from tank to tank. No ports: gas ports snap onto its faces.
 inline std::vector<uint8_t> build_intercooler_tile(const std::vector<uint8_t>& stock, int tile, const char* new_name) {
     MeshLayout m;
     if (!parse_mesh(stock, m)) return {};
-    const double h = kCell / 2, xw = 1.5 * kCell;          // the tile's own cell: y -h..h; 3 cells across
-    const double td = 0.026, tank_h = 0.03, cd = 0.017;     // tank half depth and height, core half depth
+    const double h = kCell / 2, y0 = -h, y1 = h + kCell;      // the tile's own cell along x: -h..h; 2 cells tall
+    const double td = 0.026, tank_w = 0.028, cd = 0.017;     // tank half depth and width, core half depth
     MeshBuilder b;
-    // the core's extent in this tile
-    double y0 = tile == 0 ? -h + tank_h : -h, y1 = tile == 2 ? h - tank_h : h;
-    { double lo[3] = {-xw + 0.012, y0, -cd}, hi[3] = {xw - 0.012, y1, cd}; b.box(lo, hi, kCoreDark); }
-    for (int s = -1; s <= 1; s += 2) {                       // side rails
-        double lo[3] = {s < 0 ? -xw + 0.002 : xw - 0.012, y0, -cd - 0.002}, hi[3] = {s < 0 ? -xw + 0.012 : xw - 0.002, y1, cd + 0.002};
+    double x0 = tile == 0 ? -h + tank_w : -h, x1 = tile == 2 ? h - tank_w : h;   // the core in this tile
+    { double lo[3] = {x0, y0 + 0.008, -cd}, hi[3] = {x1, y1 - 0.008, cd}; b.box(lo, hi, kCoreDark); }
+    for (int s = -1; s <= 1; s += 2) {                       // top and bottom rails
+        double lo[3] = {x0, s < 0 ? y0 + 0.002 : y1 - 0.008, -cd - 0.002}, hi[3] = {x1, s < 0 ? y0 + 0.008 : y1 - 0.002, cd + 0.002};
         b.box(lo, hi, kValveIron);
     }
-    for (int k = 0; k < 4; ++k) {                            // the fins: thin bars across both faces, 4 per cell
-        double y = -h + (k + 0.5) * kCell / 4;
-        if (y < y0 + 0.003 || y > y1 - 0.003) continue;
+    for (int k = 0; k < 8; ++k) {                            // the tubes: bars across both faces, 4 per cell of height
+        double y = y0 + 0.008 + (k + 0.5) * (y1 - y0 - 0.016) / 8;
         for (int s = -1; s <= 1; s += 2) {
-            double lo[3] = {-xw + 0.012, y - 0.0025, s < 0 ? -cd - 0.0015 : cd}, hi[3] = {xw - 0.012, y + 0.0025, s < 0 ? -cd : cd + 0.0015};
+            double lo[3] = {x0, y - 0.0025, s < 0 ? -cd - 0.0015 : cd}, hi[3] = {x1, y + 0.0025, s < 0 ? -cd : cd + 0.0015};
             b.box(lo, hi, kValveMid);
         }
     }
-    if (tile == 0 || tile == 2) {                            // end tank, its end caps and a weld seam
-        double ty0 = tile == 0 ? -h : h - tank_h, ty1 = tile == 0 ? -h + tank_h : h;
-        { double lo[3] = {-xw + 0.008, ty0, -td}, hi[3] = {xw - 0.008, ty1, td}; b.box(lo, hi, kValvePaint0); }
+    if (tile == 0 || tile == 2) {                            // end tank, its caps top and bottom, a weld seam to the core
+        double tx0 = tile == 0 ? -h : h - tank_w, tx1 = tile == 0 ? -h + tank_w : h;
+        { double lo[3] = {tx0, y0 + 0.008, -td}, hi[3] = {tx1, y1 - 0.008, td}; b.box(lo, hi, kValvePaint0); }
         for (int s = -1; s <= 1; s += 2) {
-            double lo[3] = {s < 0 ? -xw : xw - 0.008, ty0 - (tile == 0 ? 0 : 0.002), -td - 0.002}, hi[3] = {s < 0 ? -xw + 0.008 : xw, ty1 + (tile == 2 ? 0 : 0.002), td + 0.002};
+            double lo[3] = {tx0 - (tile == 0 ? 0 : 0.002), s < 0 ? y0 : y1 - 0.008, -td - 0.002}, hi[3] = {tx1 + (tile == 2 ? 0 : 0.002), s < 0 ? y0 + 0.008 : y1, td + 0.002};
             b.box(lo, hi, kValvePaint1);
         }
-        double seam = tile == 0 ? ty1 : ty0;
-        double lo[3] = {-xw + 0.008, seam - 0.0015, -td - 0.001}, hi[3] = {xw - 0.008, seam + 0.0015, td + 0.001};
+        double seam = tile == 0 ? tx1 : tx0;
+        double lo[3] = {seam - 0.0015, y0 + 0.008, -td - 0.001}, hi[3] = {seam + 0.0015, y1 - 0.008, td + 0.001};
         b.box(lo, hi, kValveIron);
     }
     return encode_valve_mesh(stock, m, b, new_name);

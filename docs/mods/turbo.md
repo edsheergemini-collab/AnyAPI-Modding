@@ -106,8 +106,8 @@ costs a damage step about every 6 to 7 minutes.
 
 The **Turbo Intercooler** fixes that. Like the radiator, it has no pipes of its own: snap gas ports onto its faces,
 small or large, wherever suits the build. Run one from the turbo's boost and one to the engine's air intake. All its
-ports share one volume of air, so the boost passes straight through. It stretches like the radiator, wider along its
-width and taller one cell at a time. A bigger core cools better, and so does slower air: a 3x2 core takes about
+ports share one volume of air, so the boost passes straight through. It has an end tank on each side, like a car's,
+and stretches like the radiator: wider one cell at a time (the tanks stay at the ends) and taller. A bigger core cools better, and so does slower air: a 3x2 core takes about
 three quarters of the heat out of a 3x3 turbo's boost. The tanks paint.
 
 ## Sounds
