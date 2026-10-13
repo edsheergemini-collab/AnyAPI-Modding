@@ -372,6 +372,39 @@ void hk_client_tick(void* self, void* client, void* vehicle, void* scene, const 
 }
 
 // ------------------------------------------------------------------------------------- install (background thread)
+bool executable(const void* p) {
+    MEMORY_BASIC_INFORMATION r{};
+    const DWORD x = PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+    return p && VirtualQuery(p, &r, sizeof(r)) && r.State == MEM_COMMIT && (r.Protect & x) && !(r.Protect & PAGE_GUARD);
+}
+// The call cell of a binding reached through a call route. The SDK's lookup refuses when the route's root code
+// signature matches more than once, which happened on the laptop for the definition functions (rooted at
+// client_scene.create): some sessions have a second copy of that code in memory. Here every match is followed and
+// the cell is taken when all the matches that lead to a live function agree on it.
+int g_route_roots = -1;
+void** route_cell(const anymaker::func_desc& d) {
+    if (!anymaker::experimental::matching_build()) return nullptr;
+    if (void** cell = anymaker::cell_of(d)) return cell;
+    const anymaker::slot_route& r = d.call_route;
+    if (!r.nhops || r.nhops > 8 || !r.root_sig || !*r.root_sig) return nullptr;
+    uint8_t* roots[8];
+    size_t n = anymaker::find_gcl_functions(r.root_sig, roots, 8);
+    g_route_roots = int(n);
+    void** found = nullptr;
+    for (size_t i = 0; i < n; ++i) {
+        uint8_t* fn = roots[i];
+        void** cell = nullptr;
+        for (uint8_t h = 0; fn && h < r.nhops; ++h) {
+            cell = reinterpret_cast<void**>(anymaker::read_slot(fn, r.hops[h]));
+            fn = anymaker::readable(cell, 8) ? reinterpret_cast<uint8_t*>(*cell) : nullptr;
+        }
+        if (!fn || !executable(fn)) continue;
+        if (found && found != cell) return nullptr;   // the copies disagree: refuse rather than guess
+        found = cell;
+    }
+    return found;
+}
+
 // Sound is optional: without it the rotary sounds like the stock engine.
 void install_sound() {
     using namespace anymaker::experimental;
@@ -408,16 +441,17 @@ void install_hooks() {
     for (int attempt = 0; attempt < 180 && !g_stop; ++attempt) {
         if (attempt) Sleep(1000);
         if (!matching_build()) { if (attempt == 0) log(1, "game build does not match the SDK reference; Rotary stays off"); return; }
-        void** add = hook_cell(bind::definitions_add_definitions);
+        void** add = route_cell(bind::definitions_add_definitions);
         void** create = hook_cell(bind::engine_create);
         auto fctor = reinterpret_cast<self_fn_t>(function(bind::definition_file_ctor));
         auto fdtor = reinterpret_cast<self_fn_t>(function(bind::definition_file_dtor));
-        auto fload = reinterpret_cast<file_load_t>(function(bind::definition_file_load));
+        void** load_cell = route_cell(bind::definition_file_load);
+        auto fload = load_cell ? reinterpret_cast<file_load_t>(*load_cell) : nullptr;
         auto sc = reinterpret_cast<string_ctor_t>(native(anymaker::sym::string_ctor_cstr_rva));
         bool core = add && create && fctor && fdtor && fload && sc;
         if (!core) {
             if (attempt == 179)
-                log(2, "could not locate the game functions (add=%d create=%d file=%d/%d/%d string=%d)", !!add, !!create, !!fctor, !!fdtor, !!fload, !!sc);
+                log(2, "could not locate the game functions (add=%d create=%d file=%d/%d/%d string=%d, definition route roots %d)", !!add, !!create, !!fctor, !!fdtor, !!fload, !!sc, g_route_roots);
             continue;
         }
         g_file_ctor = fctor; g_file_dtor = fdtor; g_file_load = fload; g_string_ctor = sc;
@@ -429,6 +463,7 @@ void install_hooks() {
         if (!h_add_definitions.install(add, (void*)&hk_add_definitions)) { log(2, "the definitions hook cell was already taken or not writable; Rotary is off"); h_create.remove((void*)&hk_create); return; }
         install_sound();
         g_ready = true;
+        if (g_route_roots > 1) log(0, "the definition functions' route root matched %d times; all matches agreed", g_route_roots);
         log(0, "Ready after %d s. Load or start a world to add the Rotary Engine (definition %s).", attempt, g_json_path.c_str());
         return;
     }
