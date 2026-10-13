@@ -280,14 +280,14 @@
     {
       "Id": "enginesound",
       "Name": "EngineSound",
-      "Version": "0.2.2",
-      "Revision": 3,
+      "Version": "0.3.0",
+      "Revision": 4,
       "MinimumApi": 34,
       "Description": "Engine sound presets (Muscle V8, Built 2JZ, Powerstroke, Hemi and more) and a Custom sound tuner in the Properties Tool engine window, synced for every player in co-op. Uses the experimental SDK; Anymaker 0.1.25 only.",
-      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/v0.37.0/EngineSound-0.2.2.zip",
-      "Sha256": "a6ce38dd9a5542bb8d90bb72b61dda418a4b87e42b58f0c76e64efbc0f3d9ec4",
+      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/mods-2026.10.13/EngineSound-0.3.0.zip",
+      "Sha256": "75859521bf640ac590d65e560612d53e152390af67cc5a3324fb57d8c530f3f6",
       "FileHashes": {
-        "AnyAPI and Modding/mods/EngineSound.dll": "96bca06f792ec8631bac775dc82d9feccad9465e61f4e5170789f9f23b55f1c7"
+        "AnyAPI and Modding/mods/EngineSound.dll": "1ffc1dc1dc585f2f69c1abc06c091429523cc699414388500db36999b46bdb89"
       },
       "GameBuilds": [
         {
@@ -343,14 +343,14 @@
     {
       "Id": "thirdperson",
       "Name": "ThirdPerson",
-      "Version": "0.1.1",
-      "Revision": 2,
+      "Version": "0.1.2",
+      "Revision": 3,
       "MinimumApi": 36,
-      "Description": "Third-person camera: F5 switches between first and third person, Alt + mouse wheel sets the follow distance (1-20 m), with a follow-distance setting. Uses the experimental SDK; Anymaker 0.1.25 only.",
-      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/v0.37.0/ThirdPerson-0.1.1.zip",
-      "Sha256": "e74aaa01e64cd48d83532b4d408cf6552da0c9d6c5e299c57c52ce2bc1bfdfd7",
+      "Description": "Third-person camera: F5 switches between first and third person, Alt + mouse wheel sets the follow distance (1-20 m). A steady camera keeps the horizon level in vehicles and smooths the view on foot. Uses the experimental SDK; Anymaker 0.1.25 only.",
+      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/mods-2026.10.13/ThirdPerson-0.1.2.zip",
+      "Sha256": "d6fe049f92487f6f1524b6f6b437c38ff78a057705bf6b874b40f607b643f05a",
       "FileHashes": {
-        "AnyAPI and Modding/mods/ThirdPerson.dll": "1787d4344d707aec084ba05eda189ac310e5ae1b8ae28f4cfb73074e497b83a7"
+        "AnyAPI and Modding/mods/ThirdPerson.dll": "34d2b009a6c64e09ca435adbe2be2cb59de466f95c2cf61354cb8baaa4506ae6"
       },
       "GameBuilds": [
         {
