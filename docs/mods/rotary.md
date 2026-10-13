@@ -1,7 +1,7 @@
 # Rotary
 
 > Rotary hooks game functions directly through the [experimental SDK](../../sdk/experimental/README.md),
-> so it only activates on Anymaker 0.1.24 / Steam build 25826614 and turns itself off on any other build.
+> so it only activates on Anymaker 0.1.25 / Steam build 25904830 and turns itself off on any other build.
 > **Prototype, single player only** for now: built from source, not in the catalog yet.
 
 Rotary adds a new part, the **Rotary Engine**. It is the stock small engine cell for cell (same size, ports,
