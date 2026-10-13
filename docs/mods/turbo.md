@@ -5,8 +5,9 @@
 > AnyEngineParts 0.1.0 is a prototype: it needs AnyAPI 0.37.0 or newer on that build. **Single player only** for now.
 
 Turbo adds four exhaust-driven turbochargers: **Turbo 2x2**, **3x3**, **4x4** and **5x5**. Each is N cells wide,
-N tall and 2 thick. The front cell is the stock impeller's compressor housing in polished steel, scaled to the size; the back
-cell is a heat-rust turbine housing, the same impeller mirrored.
+N tall and 2 thick. The front cell is the stock impeller's compressor housing, scaled to the size; the back cell is
+the turbine housing, the same impeller mirrored. A new turbo starts with a steel cold side and a cast-iron hot side,
+and the paint tool colours each side on its own, like any stock part.
 
 ## Hooking one up
 
@@ -43,24 +44,25 @@ engine loses power, as it does with any restricted exhaust. A turbo that is too 
 
 Two companion parts, in the gas parts with the turbos:
 
-- **Turbo Blow-Off Valve (Small)** (1x1x2, small pipe, for the 2x2 and 3x3) and **(Large)** (2x2x3, large
-  pipe, for the 4x4 and 5x5). Inline: pipe the turbo's boost outlet into its **steel end** (it shows as *Gas
-  node*) and its **blue end** (*Air node*) into the engine's air intake; the white arrows on the pipe point the
-  way the air flows. Boost passes straight through. When you lift off the throttle, boost trapped in the pipe is
-  higher than the turbo can hold; the valve vents it through its red cap, so the turbo keeps its spin. Without
+- **Turbo Blow-Off Valve (Small)** (1 cell, small pipe, for the 2x2 and 3x3) and **(Large)** (2x2x2, large
+  pipe, for the 4x4 and 5x5). Inline: pipe the turbo's boost outlet into its **plain end** (it shows as *Gas
+  node*) and its **blue-ringed end** (*Air node*) into the engine's air intake. Boost passes straight through.
+  When you lift off the throttle, boost trapped in the pipe is higher than the turbo can hold; the valve vents it
+  out of its trumpet, so the turbo keeps its spin. Without
   one the compressor **surges**: the boost pushes back through it and the turbo loses speed fast. Properties
   Tool: **Stiffness** (0-50 kPa, default 5), the extra boost it waits for before opening (a stiff spring lets
   some surge through), and **Sound effect** (see Sounds below); they reset to the defaults when the vehicle loads (the game's binary save format has no room for extra values). The large valve
   vents 2.5 times faster. Outputs `open` (0/1), `flow` (L/s) and `pressure` (kPa).
-- **Turbo Wastegate.** Put it between the exhaust manifold (bottom port) and a vent or the turbo's exhaust outlet
-  pipe (top port). Its `open` input (0 to 1, from a data link or microcontroller) lets exhaust bypass the turbine,
+- **Turbo Wastegate (Small)** (1 cell, small pipe) and **(Large)** (2x2x2, large pipe, flows 2.5 times as much).
+  Exhaust from the manifold goes in underneath; the side port goes to a vent or the turbo's exhaust outlet pipe. Its `open` input (0 to 1, from a data link or microcontroller) lets exhaust bypass the turbine,
   which caps boost. Its `antilag` input (1 on, 0 off) turns on antilag for the turbo on the same exhaust pipe:
   whenever the engine is running but its exhaust alone would let the turbo slow down (off throttle, idling), fuel
   burnt in the exhaust holds the turbo at 80% spool, with bangs and crackles from the wastegate. Wire it to a
   switch, or build your own logic in a microcontroller (only on a launch, only above some speed). Outputs `flow`
   (L/s) and `pressure` (kPa).
 
-The wastegate uses the gas port's look for now. The turbo's own `surge` output is 1 while it surges.
+The valves start with a steel body and a red cap; paint the body and the cap separately. The turbo's own `surge`
+output is 1 while it surges.
 
 ## Sounds
 

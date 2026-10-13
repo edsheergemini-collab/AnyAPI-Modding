@@ -53,6 +53,9 @@ void log(int level, const char* fmt, ...) {
 namespace off {
 constexpr ptrdiff_t component_id = 64;               // server_scene.vehicle_component.m_id (s32)
 constexpr ptrdiff_t component_definition = 312;      // m_definition (ptr<const vehicle_component_definition>)
+constexpr ptrdiff_t component_colors = 136;          // m_colors (array<replication.master.property_s32>: buffer, count, element size)
+constexpr ptrdiff_t property_modified = 16;          // replication.master.property.m_is_modified (bool)
+constexpr ptrdiff_t property_s32_value = 24;         // property_type_simple<s32>._m_value
 constexpr ptrdiff_t definition_id = 0;               // vehicle_component_definition.m_id (string)
 constexpr ptrdiff_t pump_factor_speed = 480;         // gas_pump_centrifugal.m_factor_speed (replicated, drives the client's sound)
 constexpr ptrdiff_t pump_content_0 = 528;            // m_content_0: compressor inlet
@@ -153,9 +156,10 @@ double now_seconds() {
 
 // What a gas_pump_centrifugal component is: 2-5 a turbo of that size, kKindBlowOff(Large) / kKindWastegate a valve,
 // 0 a stock impeller.
-constexpr int kKindBlowOff = 10, kKindWastegate = 11, kKindBlowOffLarge = 12;
+constexpr int kKindBlowOff = 10, kKindWastegate = 11, kKindBlowOffLarge = 12, kKindWastegateLarge = 13;
 bool is_blow_off(int kind) { return kind == kKindBlowOff || kind == kKindBlowOffLarge; }
-bool is_valve(int kind) { return is_blow_off(kind) || kind == kKindWastegate; }
+bool is_wastegate(int kind) { return kind == kKindWastegate || kind == kKindWastegateLarge; }
+bool is_valve(int kind) { return is_blow_off(kind) || is_wastegate(kind); }
 int kind_of_definition(const void* definition) {
     if (!definition) return 0;
     auto found = g_definition_size.find(definition);
@@ -169,6 +173,7 @@ int kind_of_definition(const void* definition) {
             if (v == kBlowOff) n = kKindBlowOff;
             else if (v == kBlowOffLarge) n = kKindBlowOffLarge;
             else if (v == kWastegate) n = kKindWastegate;
+            else if (v == kWastegateLarge) n = kKindWastegateLarge;
         }
     }
     g_definition_size[definition] = n;
@@ -279,6 +284,34 @@ double* valve_setting(ValvePart& v) {
     return v.setting;
 }
 
+// Starting colours, as indices into the game's colour palette (rom/textures/color_palette.txtr): the meshes mark the
+// turbo's cold and hot housings and each valve's body and cap as paint slots 0 and 1 (turbo_mesh.h).
+constexpr int32_t kPaletteSteel = 81, kPaletteCastIron = 79, kPaletteRed = 33;
+
+// Gives a newly placed part its starting colours in paint slots 0 and 1. A new part has every slot at the same
+// default; a part that was painted (or whose saved colours are already in) is left alone.
+void default_paint(void* self, int32_t slot0, int32_t slot1) {
+    auto* colors = static_cast<uint8_t*>(self) + off::component_colors;
+    if (!anymaker::readable(colors, 16)) return;
+    auto* buffer = at<uint8_t*>(colors, 0);
+    int32_t count = at<int32_t>(colors, 8), size = at<int32_t>(colors, 12);
+    if (!buffer || count < 2 || count > 16 || size < off::property_s32_value + 4 || !anymaker::readable(buffer, size_t(count) * size_t(size))) return;
+    int32_t first = at<int32_t>(buffer, off::property_s32_value);
+    bool fresh = true;
+    for (int32_t k = 1; k < count; ++k) fresh = fresh && at<int32_t>(buffer + size_t(k) * size_t(size), off::property_s32_value) == first;
+    static std::atomic<int> logs{6};
+    if (logs.fetch_sub(1) > 0)
+        log(0, "component %d colours: slot 0 = %d, slot 1 = %d (%s)", at<int32_t>(self, off::component_id), first,
+            at<int32_t>(buffer + size_t(size), off::property_s32_value), fresh ? "new: starting colours applied" : "painted: kept");
+    if (!fresh) return;
+    const int32_t want[2] = {slot0, slot1};
+    for (int k = 0; k < 2; ++k) {
+        uint8_t* property = buffer + size_t(k) * size_t(size);
+        at<int32_t>(property, off::property_s32_value) = want[k];
+        at<bool>(property, off::property_modified) = true;
+    }
+}
+
 void hk_create(void* self, void* vehicle) {
     reinterpret_cast<create_t>(h_create.original)(self, vehicle);
     if (!self || !vehicle) return;
@@ -288,6 +321,7 @@ void hk_create(void* self, void* vehicle) {
         ValvePart& v = g_valves[self];
         v.kind = kind;
         valve_setting(v);
+        default_paint(self, kPaletteSteel, kPaletteRed);
         if (is_blow_off(kind) && g_bov_inline) {
             // Make both gas nodes ask this component which nodes they flood to (hk_flood joins them).
             at<void*>(static_cast<uint8_t*>(self) + off::pump_node_a, off::node_component_flood) = self;
@@ -304,6 +338,7 @@ void hk_create(void* self, void* vehicle) {
     Turbo& t = g_turbos[self];
     if (t.hot) return;
     t.size = n; t.spec = spec(n);
+    default_paint(self, kPaletteSteel, kPaletteCastIron);
     t.hot = create_hot_side(self, vehicle);
     static std::atomic<int> logs{8};
     if (logs.fetch_sub(1) > 0 && t.hot)
@@ -392,7 +427,7 @@ ValvePart* antilag_wastegate(Turbo& t) {
     ValvePart* found = nullptr;
     for_each_on_island(t.hot->node[0], [&](void* node) {
         auto v = g_valves.find(at<void*>(node, off::node_component));
-        if (!found && v != g_valves.end() && v->second.kind == kKindWastegate && v->second.state.slots[kValveAntilag] > 0.5) found = &v->second;
+        if (!found && v != g_valves.end() && is_wastegate(v->second.kind) && v->second.state.slots[kValveAntilag] > 0.5) found = &v->second;
     });
     return found;
 }
@@ -421,7 +456,8 @@ void tick_valve(void* self, int kind) {
         v.vented_by = nullptr;
         v.state.slots[kValveOpen] = now_seconds() < v.open_until ? 1.0 : 0.0;
     } else {
-        double move = wastegate_move(v.state.slots[kValveOpen], pressure_of(c0), pressure_of(c1), at<double>(c0, off::content_volume), at<double>(c1, off::content_volume), dt);
+        double move = wastegate_move(v.state.slots[kValveOpen], pressure_of(c0), pressure_of(c1), at<double>(c0, off::content_volume), at<double>(c1, off::content_volume), dt,
+                                     kind == kKindWastegateLarge);
         if (move > 0) g_content_move(c0, c1, &move);
         else if (move < 0) { double back = -move; g_content_move(c1, c0, &back); }
         litres = std::abs(move);
@@ -659,7 +695,7 @@ bool write_file(const std::wstring& path, const void* data, size_t size) {
     return ok;
 }
 
-// Writes the turbo and blow-off valve meshes into rom/meshes/components (where the game loads part meshes) and the definitions file
+// Writes the turbo, blow-off valve and wastegate meshes into rom/meshes/components (where the game loads part meshes) and the definitions file
 // into "AnyAPI and Modding/Turbo".
 bool write_definition_file() {
     HMODULE self = nullptr;
@@ -690,10 +726,20 @@ bool write_definition_file() {
         bov_built[large] = !mesh.empty() && write_file(file, mesh.data(), mesh.size());
     }
     if (!bov_built[0] || !bov_built[1]) log(1, "blow-off valve meshes not written; the valves use the stock impeller look");
+    bool wg_built[2]{};
+    for (int large = 0; large < 2; ++large) {
+        std::string path = wastegate_mesh_path(large != 0);
+        std::string name = path.substr(path.find_last_of('/') + 1);
+        name = name.substr(0, name.size() - 5);
+        std::vector<uint8_t> mesh = build_wastegate_mesh(stock, large != 0, name.c_str());
+        std::wstring file = components + std::wstring(name.begin(), name.end()) + L".mesh";
+        wg_built[large] = !mesh.empty() && write_file(file, mesh.data(), mesh.size());
+    }
+    if (!wg_built[0] || !wg_built[1]) log(1, "wastegate meshes not written; the wastegates use the gas port look");
     dir += L"\\Turbo";
     CreateDirectoryW(dir.c_str(), nullptr);
     std::wstring file = dir + L"\\turbochargers.json";
-    std::string json = definitions_json(built, bov_built);
+    std::string json = definitions_json(built, bov_built, wg_built);
     bool ok = write_file(file, json.data(), json.size());
     int n = WideCharToMultiByte(CP_UTF8, 0, file.c_str(), -1, nullptr, 0, nullptr, nullptr);
     g_json_path.assign(size_t(n > 0 ? n - 1 : 0), '\0');
@@ -817,7 +863,7 @@ void stream_sound(void* self, int kind, const double* dt) {
     if (is_blow_off(kind)) {
         v.synth.voice = Voice::kBlowOff;
         decode_blow_off_factor(factor, flag, level, v.synth.sound, v.synth.size);
-    } else if (kind == kKindWastegate) {
+    } else if (is_wastegate(kind)) {
         v.synth.voice = Voice::kAntilag;
         int unused = 0;
         decode_blow_off_factor(factor, flag, level, unused, v.synth.size);
@@ -886,7 +932,7 @@ void hk_client_tick(void* self, void* network, void* vehicle, void* scene, const
     }
     if (!kind) { reinterpret_cast<client_tick_t>(h_client_tick.original)(self, network, vehicle, scene, dt); return; }
     // The wastegate only makes a sound (antilag bangs) once it has fired.
-    bool silent = kind == kKindWastegate && !g_voices.count(self) && !(at<double>(self, off::client_factor_speed) > 0);
+    bool silent = is_wastegate(kind) && !g_voices.count(self) && !(at<double>(self, off::client_factor_speed) > 0);
     if (!silent) stream_sound(self, kind, dt);
     double now = now_seconds();
     if (now - g_last_sweep > 1.0) {                 // parts gone from the scene stop ticking: free their voices

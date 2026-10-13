@@ -5,9 +5,9 @@
 // turbo_a.mesh is the 1 x 3 x 3 cell impeller: x from -0.04 to 0.05 m (the axial intake faces -x, the hub +x),
 // y and z from -0.12 to 0.12 m, the outlet stub on the top (+y) edge leaving +z. One cell is 0.08 m.
 // A turbo of size N (N x N face, 2 cells thick) is:
-//   cold side, cell x = 0: the impeller scaled by N/3 across its face, recentred on the N x N face, painted steel;
+//   cold side, cell x = 0: the impeller scaled by N/3 across its face, recentred on the N x N face (paint 1);
 //   hot side,  cell x = 1: the same impeller mirrored front to back, turned half a turn about its axis (outlet
-//                          stub at the bottom leaving -z: the turbine inlet) and painted heat-rust.
+//                          stub at the bottom leaving -z: the turbine inlet) (paint 2).
 // Mesh file layout (Anymaker 0.1.24; the same reader as GpsPart, checked by parse):
 //   "mesh" u32 version(5) u32 (1) u32 name_length, name bytes
 //   32-byte attribute header, 56 bytes (zero), 6 x f64 bounds (min xyz, max xyz)
@@ -47,13 +47,17 @@ inline bool parse_mesh(const std::vector<uint8_t>& b, MeshLayout& m) {
     return true;
 }
 
-// The stock impeller's red paint becomes polished steel on the compressor housing (Nate, 2026-10-13: "a steel grey,
-// kinda chrome") and heat-rust on the turbine housing; its greys stay.
+// Paint: the stock impeller's red is the game's first paint marker (153, 0, 0): a part's mesh is drawn in the part's
+// own colours wherever it carries one of these markers, and the paint tool sets each one separately. The compressor
+// housing keeps the first marker and the turbine housing takes the second (153, 38, 0), so the cold and hot sides are
+// painted independently. A new turbo starts steel on the cold side and cast iron on the hot side (turbo_mod.cpp).
+constexpr uint8_t kPaint0[3] = {153, 0, 0}, kPaint1[3] = {153, 38, 0};
+inline bool is_paint0(const uint8_t rgba[4]) { return rgba[0] > 120 && rgba[1] < 30 && rgba[2] < 30; }
 inline void cold_paint(uint8_t rgba[4]) {
-    if (rgba[0] > 120 && rgba[1] < 40 && rgba[2] < 40) { rgba[0] = 200; rgba[1] = 205; rgba[2] = 214; }
+    if (is_paint0(rgba)) { rgba[0] = kPaint0[0]; rgba[1] = kPaint0[1]; rgba[2] = kPaint0[2]; }
 }
 inline void hot_paint(uint8_t rgba[4]) {
-    if (rgba[0] > 120 && rgba[1] < 40 && rgba[2] < 40) { rgba[0] = 156; rgba[1] = 74; rgba[2] = 32; }
+    if (is_paint0(rgba)) { rgba[0] = kPaint1[0]; rgba[1] = kPaint1[1]; rgba[2] = kPaint1[2]; }
 }
 
 // Builds the size-n turbo mesh from the stock impeller. Returns an empty vector when the input layout is not

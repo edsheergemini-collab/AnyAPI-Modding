@@ -52,7 +52,7 @@ struct Mesh {
 struct P2 { double x, y; };
 // The housing's outline: a rounded oval (superellipse) a bit pinched at the waist, centred above the shaft.
 constexpr double kOvalA = 0.115, kOvalB = 0.166, kOvalY = 0.052;
-constexpr int kOvalPoints = 48;
+constexpr int kOvalPoints = 16;              // faceted like the stock parts
 inline std::vector<P2> oval(double grow) {
     std::vector<P2> out;
     const double a = kOvalA + grow, b = kOvalB + grow, p = 2.4;
@@ -79,11 +79,11 @@ inline std::vector<P2> octagon(double r, double first_deg) {
     for (double a : t) out.push_back({r * std::cos(a), r * std::sin(a)});
     return out;
 }
-// Rounded rectangle (superellipse) for the intake plenum.
-inline std::vector<P2> rounded(double cx, double cy, double hx, double hy, int n = 32) {
+// Rounded rectangle (superellipse) for the intake plenum; 8 points give the stock parts' chamfered box.
+inline std::vector<P2> rounded(double cx, double cy, double hx, double hy, int n = 8) {
     std::vector<P2> out;
     for (int k = 0; k < n; ++k) {
-        double t = 6.283185307179586 * k / n, c = std::cos(t), s = std::sin(t);
+        double t = 6.283185307179586 * (k + 0.5) / n, c = std::cos(t), s = std::sin(t);
         out.push_back({cx + hx * (c < 0 ? -1 : 1) * std::pow(std::abs(c), 0.5), cy + hy * (s < 0 ? -1 : 1) * std::pow(std::abs(s), 0.5)});
     }
     return out;
@@ -171,9 +171,17 @@ inline void build_engine(Mesh& m, const Window& w, int rotors) {
     const double length = 2.0 * rotors;
     const auto housing = oval(0), rib = oval(0.0025), plate = oval(0.004), cover = oval(0.002);
     // Covers and plates: front cover, an intermediate plate between rotors, rear cover.
-    prism(m, w, cover, 0.0, 0.16, kIron);
-    prism(m, w, cover, length - 0.16, length, kIron);
-    for (int k = 1; k < rotors; ++k) prism(m, w, plate, 2.0 * k - 0.12, 2.0 * k + 0.12, kIron);
+    // The stock engines' look: painted body (first colour), second colour on the covers, plates and plenum, dark iron
+    // bands and port frames, light bolt heads.
+    prism(m, w, cover, 0.0, 0.16, kRib);
+    prism(m, w, cover, length - 0.16, length, kRib);
+    for (int k = 1; k < rotors; ++k) prism(m, w, plate, 2.0 * k - 0.12, 2.0 * k + 0.12, kRib);
+    // Tension bolt heads around the top of each cover, clear of the output socket.
+    for (const P2& p : oval(-0.014)) {
+        if (p.y < 0.13) continue;
+        box(m, w, p.x - 0.007, p.x + 0.007, p.y - 0.007, p.y + 0.007, -0.08, 0.0, kAlloy);
+        box(m, w, p.x - 0.007, p.x + 0.007, p.y - 0.007, p.y + 0.007, length, length + 0.08, kAlloy);
+    }
     // The output faces, front and back: the small engine's octagonal torque socket, ring for ring (alloy rim, iron
     // face, teal band, alloy collar, iron boss and the shaft stub into the 0.02 m lip), so gearboxes and engine wheels
     // look as they do on the stock engines. The torque mating surfaces are the stock engine's (rotary_logic.h).
@@ -194,15 +202,15 @@ inline void build_engine(Mesh& m, const Window& w, int rotors) {
         }
     }
     // Intake plenum on top, oil pan underneath.
-    prism(m, w, rounded(0, 0.292, 0.088, 0.055), 0.22, length - 0.22, kAlloy);
+    prism(m, w, rounded(0, 0.292, 0.088, 0.055), 0.22, length - 0.22, kRib);
     box(m, w, -0.072, 0.072, -0.12, -0.085, 0.3, length - 0.3, kIron);
     const double plug_y[2] = {-0.045, -0.085};
     for (int k = 0; k < rotors; ++k) {
         double e0 = 2.0 * k, e1 = e0 + 2.0, c = e0 + 1.0;
         // Rotor housing between the side plates, with two raised ribs.
         prism(m, w, housing, e0 + (k == 0 ? 0.16 : 0.12), e1 - (k == rotors - 1 ? 0.16 : 0.12), kHousing, false, false);
-        prism(m, w, rib, c - 0.55, c - 0.4, kRib);
-        prism(m, w, rib, c + 0.4, c + 0.55, kRib);
+        prism(m, w, rib, c - 0.55, c - 0.4, kIron);
+        prism(m, w, rib, c + 0.4, c + 0.55, kIron);
         // Leading and trailing spark plugs on the left side.
         for (double y : plug_y) {
             double x = -oval_half_width(y);
@@ -219,7 +227,7 @@ inline void build_engine(Mesh& m, const Window& w, int rotors) {
         }
         // Two intake runners from the housing's top into the plenum.
         for (int side = -1; side <= 1; side += 2)
-            box(m, w, side * 0.052 - 0.015, side * 0.052 + 0.015, 0.2, 0.25, c - 0.35, c + 0.35, kAlloy);
+            box(m, w, side * 0.052 - 0.015, side * 0.052 + 0.015, 0.2, 0.25, c - 0.35, c + 0.35, kIron);
     }
 }
 

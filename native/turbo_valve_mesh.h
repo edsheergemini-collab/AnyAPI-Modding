@@ -1,11 +1,14 @@
 #pragma once
-// Blow-off valve meshes, built from simple shapes at start-up (the file header is copied from the stock impeller
-// mesh, like the turbos'). An inline valve: a straight pipe along +z with the valve body on top.
+// Blow-off valve and wastegate meshes, built from simple shapes at start-up (the file header is copied from the stock
+// impeller mesh, like the turbos'). They use the stock parts' look: eight-sided shapes, a painted body, dark port
+// frames with light bolt heads. Paint slots (the game's colour markers, see kPaint0/kPaint1 in turbo_mesh.h): the
+// body takes the part's first colour and the cap its second, so the paint tool colours them separately.
 //
-//   small: 1 x 1 x 2 cells, small pipe.  large: 2 x 2 x 3 cells, large pipe.
-//   inlet end (-z, from the turbo): bare steel flange.  outlet end (+z, to the air manifold): blue flange, and a
-//   white arrow on the pipe pointing from the turbo to the engine.  Body: polished housing, red anodised cap,
-//   dark vent horn on its side.
+//   blow-off valve, small: 1 cell, small pipe; large: 2 x 2 x 2 cells, large pipe. A short pipe along z (inlet -z
+//     from the turbo, outlet +z to the air manifold, a blue ring on the outlet) with the valve on top: neck, clamp
+//     band, body, cap with bolts, and a flared vent trumpet on the side.
+//   wastegate, small: 1 cell, small pipe; large: 2 x 2 x 2 cells, large pipe. Inlet from below (the exhaust
+//     manifold), outlet out the +x side, the actuator can on top with its cap, bolts and a boost nipple.
 #include "turbo_mesh.h"
 
 namespace turbo {
@@ -51,6 +54,55 @@ struct MeshBuilder {
         disc(axis, centre, r1, w1, true, c, seg);
     }
     void cylinder(int axis, const double centre[3], double r, double w0, double w1, const uint8_t c[3], int seg = 24) { frustum(axis, centre, r, r, w0, w1, c, seg); }
+    // frustum() with flat faces (one normal per side) and its first corner turned by `phase` radians.
+    void frustum_phase(int axis, const double centre[3], double r0, double r1, double w0, double w1, const uint8_t c[3], int seg, double phase) {
+        double slope = (r0 - r1) / (w1 - w0);
+        for (int i = 0; i < seg; ++i) {
+            double a0 = phase + 2 * kPi * i / seg, a1 = phase + 2 * kPi * (i + 1) / seg, am = (a0 + a1) / 2;
+            double l = std::sqrt(1 + slope * slope), nn[3], p[3];
+            place(axis, kOrigin, std::cos(am) / l, std::sin(am) / l, slope / l, nn);
+            uint32_t q[4];
+            const double corner[4][3] = {{r0, a0, w0}, {r0, a1, w0}, {r1, a1, w1}, {r1, a0, w1}};
+            for (int k = 0; k < 4; ++k) {
+                place(axis, centre, corner[k][0] * std::cos(corner[k][1]), corner[k][0] * std::sin(corner[k][1]), corner[k][2], p);
+                q[k] = vertex(p[0], p[1], p[2], nn[0], nn[1], nn[2], c);
+            }
+            tri(q[0], q[1], q[3]); tri(q[1], q[2], q[3]);
+        }
+        disc_phase(axis, centre, r0, w0, false, c, seg, phase);
+        disc_phase(axis, centre, r1, w1, true, c, seg, phase);
+    }
+    void disc_phase(int axis, const double centre[3], double r, double w, bool facing_up, const uint8_t c[3], int seg, double phase) {
+        double n[3]; place(axis, kOrigin, 0, 0, facing_up ? 1 : -1, n);
+        double p[3]; place(axis, centre, 0, 0, w, p);
+        uint32_t mid = vertex(p[0], p[1], p[2], n[0], n[1], n[2], c), first = uint32_t(verts.size());
+        for (int i = 0; i < seg; ++i) {
+            double a = phase + 2 * kPi * i / seg;
+            place(axis, centre, r * std::cos(a), r * std::sin(a), w, p);
+            vertex(p[0], p[1], p[2], n[0], n[1], n[2], c);
+        }
+        for (int i = 0; i < seg; ++i) {
+            uint32_t a = first + uint32_t(i), d = first + uint32_t((i + 1) % seg);
+            if (facing_up) tri(mid, a, d); else tri(mid, d, a);
+        }
+    }
+    // An axis-aligned box from lo to hi.
+    void box(const double lo[3], const double hi[3], const uint8_t c[3]) {
+        for (int axis = 0; axis < 3; ++axis)
+            for (int side = 0; side < 2; ++side) {
+                double n[3] = {0, 0, 0}; n[axis] = side ? 1 : -1;
+                int a = (axis + 1) % 3, d = (axis + 2) % 3;
+                double w = side ? hi[axis] : lo[axis];
+                uint32_t q[4];
+                const double uv[4][2] = {{lo[a], lo[d]}, {hi[a], lo[d]}, {hi[a], hi[d]}, {lo[a], hi[d]}};
+                for (int k = 0; k < 4; ++k) {
+                    double p[3]; p[axis] = w; p[a] = uv[k][0]; p[d] = uv[k][1];
+                    q[k] = vertex(p[0], p[1], p[2], n[0], n[1], n[2], c);
+                }
+                if (side) { tri(q[0], q[1], q[2]); tri(q[0], q[2], q[3]); }
+                else { tri(q[0], q[2], q[1]); tri(q[0], q[3], q[2]); }
+            }
+    }
     void disc(int axis, const double centre[3], double r, double w, bool facing_up, const uint8_t c[3], int seg) {
         double n[3]; place(axis, kOrigin, 0, 0, facing_up ? 1 : -1, n);
         double p[3]; place(axis, centre, 0, 0, w, p);
@@ -76,40 +128,25 @@ struct MeshBuilder {
     }
 };
 
-// Builds the small (large = false) or large inline blow-off valve. `stock` is any version-5 game mesh; only its
-// header and trailer are reused. Returns an empty vector if the stock mesh is not readable.
-inline std::vector<uint8_t> build_blow_off_mesh(const std::vector<uint8_t>& stock, bool large, const char* new_name) {
-    MeshLayout m;
-    if (!parse_mesh(stock, m)) return {};
-    static const uint8_t steel[3] = {150, 154, 160}, pipe_grey[3] = {112, 116, 122}, polished[3] = {196, 200, 206};
-    static const uint8_t cap_red[3] = {190, 28, 32}, air_blue[3] = {40, 110, 210}, white[3] = {235, 235, 235}, dark[3] = {40, 42, 46};
-    const double h = kCell / 2;                                 // half a cell
-    const int cells = large ? 3 : 2;
-    const double cx = large ? h : 0, cy = large ? h : 0;        // pipe axis: centre of the 1x1 or 2x2 face
-    const double r = large ? 0.046 : 0.019, flange = large ? 0.058 : 0.026, lip = large ? 0.012 : 0.007;
-    const double z0 = -h, z1 = (cells - 1) * kCell + h;
-    const double bz = (z0 + z1) / 2;                            // valve body over the middle of the pipe
-    const double top = large ? 3 * h : h;                       // top of the part's cells
-    MeshBuilder b;
-    const double axis[3] = {cx, cy, 0};
-    b.cylinder(2, axis, r, z0 + lip, z1 - lip, pipe_grey);
-    b.cylinder(2, axis, flange, z0, z0 + lip, steel);           // inlet, from the turbo
-    b.cylinder(2, axis, flange, z1 - lip, z1, air_blue);        // outlet, to the air manifold
-    // valve body: a short neck, the housing and the cap
-    const double body_r = large ? 0.036 : 0.016, cap_r = large ? 0.043 : 0.0195;
-    const double body_base[3] = {cx, cy, bz};
-    double y_neck = r * 0.8, y_body = cy + r + (top - cy - r) * 0.25, y_cap = top + (large ? 0.012 : 0.004);   // the cap may rise a little past the cells
-    b.cylinder(1, body_base, body_r * 0.7, y_neck, y_body - cy, steel);
-    b.cylinder(1, body_base, body_r, y_body - cy - (large ? 0.012 : 0.006), y_cap - cy - (large ? 0.012 : 0.006), polished);
-    b.frustum(1, body_base, cap_r, cap_r * 0.8, y_cap - cy - (large ? 0.014 : 0.007), y_cap - cy, cap_red);
-    // vent horn on the +x side of the housing
-    const double horn_at[3] = {cx, cy + (y_body - cy) * 1.0, bz};
-    b.frustum(0, horn_at, body_r * 0.45, body_r * 0.75, body_r * 0.6, body_r + (large ? 0.026 : 0.012), dark, 16);
-    // flow arrows on the pipe top (both sides of the body), pointing from the turbo to the engine
-    double arrow_y = cy + r + 0.002, hw = r * 0.55;
-    b.arrow(cx, arrow_y, z0 + lip + 0.004, bz - body_r - 0.004, hw, white);
-    b.arrow(cx, arrow_y, bz + body_r + 0.004, z1 - lip - 0.004, hw, white);
 
+// Paint markers and the stock parts' fixed colours.
+static const uint8_t kValvePaint0[3] = {153, 0, 0}, kValvePaint1[3] = {153, 38, 0};
+static const uint8_t kValveIron[3] = {51, 51, 51}, kValveMid[3] = {113, 113, 113}, kValveAlloy[3] = {198, 198, 198};
+static const uint8_t kValveAirBlue[3] = {40, 110, 210}, kValveHole[3] = {14, 14, 16};
+
+// An eight-sided prism or frustum along `axis` with flats facing the other two axes.
+inline void oct(MeshBuilder& b, int axis, const double c[3], double r0, double r1, double w0, double w1, const uint8_t col[3]) {
+    const double k = 1.0 / std::cos(MeshBuilder::kPi / 8);   // flat-to-corner: the flats sit at r
+    b.frustum_phase(axis, c, r0 * k, r1 * k, w0, w1, col, 8, MeshBuilder::kPi / 8);
+}
+// A small square bolt head on the face of `axis` (pointing +), centred at p.
+inline void bolt(MeshBuilder& b, int axis, const double p[3], double half, const uint8_t col[3]) {
+    double lo[3], hi[3];
+    for (int i = 0; i < 3; ++i) { lo[i] = p[i] - half; hi[i] = p[i] + half; }
+    lo[axis] = p[axis]; hi[axis] = p[axis] + half * 0.8;
+    b.box(lo, hi, col);
+}
+inline std::vector<uint8_t> encode_valve_mesh(const std::vector<uint8_t>& stock, const MeshLayout& m, const MeshBuilder& b, const char* new_name) {
     double bounds[6] = {1e9, 1e9, 1e9, -1e9, -1e9, -1e9};
     for (auto& v : b.verts) for (int j = 0; j < 3; ++j) { bounds[j] = std::fmin(bounds[j], v.pos[j]); bounds[3 + j] = std::fmax(bounds[3 + j], v.pos[j]); }
     std::string name(new_name);
@@ -124,6 +161,77 @@ inline std::vector<uint8_t> build_blow_off_mesh(const std::vector<uint8_t>& stoc
     u = uint32_t(b.idx.size() * 4); put(&u, 4); put(b.idx.data(), b.idx.size() * 4);
     put(stock.data() + m.trailer, 8);
     return out;
+}
+
+// The pipe sizes the game draws for a small and a large gas node.
+inline double valve_pipe_radius(bool large) { return large ? 0.046 : 0.019; }
+
+// Builds the small (large = false) or large blow-off valve. `stock` is any version-5 game mesh; only its header and
+// trailer are reused. Returns an empty vector if the stock mesh is not readable.
+inline std::vector<uint8_t> build_blow_off_mesh(const std::vector<uint8_t>& stock, bool large, const char* new_name) {
+    MeshLayout m;
+    if (!parse_mesh(stock, m)) return {};
+    const double u = large ? kCell : kCell / 2;                  // half the part's size
+    const double c0 = large ? kCell / 2 : 0;                     // centre of the part
+    const double rp = valve_pipe_radius(large), rb = large ? 0.044 : 0.02;
+    MeshBuilder b;
+    const double axis[3] = {c0, c0, c0};
+    // the pipe stub and its two port frames
+    oct(b, 2, axis, rp, rp, -u + 0.1 * u, u - 0.1 * u, kValveMid);
+    oct(b, 2, axis, rp * 1.32, rp * 1.32, -u, -u + 0.14 * u, kValveIron);
+    oct(b, 2, axis, rp * 1.32, rp * 1.32, u - 0.14 * u, u, kValveIron);
+    oct(b, 2, axis, rp * 1.4, rp * 1.4, u - 0.32 * u, u - 0.2 * u, kValveAirBlue);   // outlet: to the air manifold
+    oct(b, 2, axis, rp * 0.72, rp * 0.72, -u - 0.002, -u + 0.001, kValveHole);
+    oct(b, 2, axis, rp * 0.72, rp * 0.72, u - 0.001, u + 0.002, kValveHole);
+    // the valve on top
+    const double top = rp * 0.85;                                // where the neck leaves the pipe (relative to c0)
+    const double hu = large ? 0.75 * u : u;                      // the large pipe leaves less room above it
+    const double neck0 = top, neck1 = rp + 0.08 * hu, band1 = neck1 + 0.08 * hu, body1 = band1 + 0.32 * hu, cap1 = body1 + 0.18 * hu;
+    oct(b, 1, axis, rb * 0.62, rb * 0.62, neck0, neck1, kValveIron);
+    oct(b, 1, axis, rb * 1.1, rb * 1.1, neck1, band1, kValveAlloy);
+    oct(b, 1, axis, rb, rb, band1, body1, kValvePaint0);
+    oct(b, 1, axis, rb * 1.06, rb * 0.78, body1, cap1, kValvePaint1);
+    for (int k = 0; k < 4; ++k) {                                // four cap screws on top
+        double a = MeshBuilder::kPi / 4 + k * MeshBuilder::kPi / 2, p[3] = {c0 + std::cos(a) * rb * 0.5, c0 + cap1, c0 + std::sin(a) * rb * 0.5};
+        bolt(b, 1, p, rb * 0.13, kValveAlloy);
+    }
+    // the vent trumpet on the +x side
+    const double horn_at[3] = {c0, c0 + (band1 + body1) / 2, c0};
+    oct(b, 0, horn_at, rb * 0.42, rb * 0.42, rb * 0.9, rb * 1.25, kValveIron);
+    oct(b, 0, horn_at, rb * 0.48, rb * 0.78, rb * 1.25, rb * 1.75, kValveIron);
+    oct(b, 0, horn_at, rb * 0.6, rb * 0.6, rb * 1.75, rb * 1.76, kValveHole);
+    return encode_valve_mesh(stock, m, b, new_name);
+}
+
+// Builds the small or large wastegate: inlet from below, outlet out the +x side, actuator on top.
+inline std::vector<uint8_t> build_wastegate_mesh(const std::vector<uint8_t>& stock, bool large, const char* new_name) {
+    MeshLayout m;
+    if (!parse_mesh(stock, m)) return {};
+    const double u = large ? kCell : kCell / 2, c0 = large ? kCell / 2 : 0;
+    const double rp = valve_pipe_radius(large), ra = large ? 0.054 : 0.026;
+    const double centre[3] = {c0, c0, c0};
+    MeshBuilder b;
+    // inlet: frame under the part and the valve housing above it
+    oct(b, 1, centre, rp * 1.32, rp * 1.32, -u, -u + 0.14 * u, kValveIron);
+    oct(b, 1, centre, rp * 0.72, rp * 0.72, -u - 0.002, -u + 0.001, kValveHole);
+    oct(b, 1, centre, rp, rp, -u + 0.14 * u, -0.1 * u, kValveMid);
+    oct(b, 1, centre, rp * 1.18, rp * 1.18, -0.1 * u, 0.28 * u, kValveMid);
+    // outlet out the +x side
+    oct(b, 0, centre, rp, rp, 0, u - 0.14 * u, kValveMid);
+    oct(b, 0, centre, rp * 1.32, rp * 1.32, u - 0.14 * u, u, kValveIron);
+    oct(b, 0, centre, rp * 0.72, rp * 0.72, u - 0.001, u + 0.002, kValveHole);
+    // actuator: clamp band, can (first colour), cap (second colour) with bolts and a boost nipple
+    const double band0 = 0.28 * u, band1 = 0.38 * u, can1 = 0.72 * u, cap1 = 0.9 * u;
+    oct(b, 1, centre, ra * 1.06, ra * 1.06, band0, band1, kValveAlloy);
+    oct(b, 1, centre, ra, ra, band1, can1, kValvePaint0);
+    oct(b, 1, centre, ra * 1.04, ra * 0.8, can1, cap1, kValvePaint1);
+    for (int k = 0; k < 4; ++k) {
+        double a = MeshBuilder::kPi / 4 + k * MeshBuilder::kPi / 2, p[3] = {c0 + std::cos(a) * ra * 0.55, c0 + cap1, c0 + std::sin(a) * ra * 0.55};
+        bolt(b, 1, p, ra * 0.11, kValveAlloy);
+    }
+    const double nipple[3] = {c0, c0 + cap1, c0};
+    oct(b, 1, nipple, ra * 0.16, ra * 0.12, 0, 0.1 * u, kValveAlloy);
+    return encode_valve_mesh(stock, m, b, new_name);
 }
 
 }  // namespace turbo

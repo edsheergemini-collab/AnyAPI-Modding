@@ -11,8 +11,9 @@ rotary housing, 25% more power and its own synthesized sound.
 ## Rotors
 
 Stretch it along its length like the small engine. Every 2 cells is one more rotor, from **1 to 4 rotors**
-(2 to 8 cells long). Each rotor is a red rounded housing between dark side plates, with spark plugs and an
-exhaust flange on each side, under one intake plenum.
+(2 to 8 cells long). Each rotor housing sits between side plates, with spark plugs and an exhaust flange on each
+side, under one intake plenum. It is drawn in the stock engines' style and paints like them: the housings take
+the first colour, the covers, plates and plenum the second.
 
 | Rotors | Length | Max power | Small engine of the same length |
 | --- | --- | --- | --- |

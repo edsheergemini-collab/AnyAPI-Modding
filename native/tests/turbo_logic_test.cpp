@@ -1,5 +1,6 @@
 #include "../turbo_logic.h"
 #include "../turbo_mesh.h"
+#include "../turbo_valve_mesh.h"
 #include "../turbo_sound.h"
 #include <cassert>
 #include <cmath>
@@ -69,11 +70,13 @@ int main() {
         for (int k = 0; k < kNodeCount; ++k) { Port p = port(n, Node(k)); assert(p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y < n && p.z >= 0 && p.z < n); }
     assert(port(3, kColdIn).dir == 0 && port(3, kHotOut).dir == 1 && port(3, kColdIn).y == 1 && port(4, kColdOut).y == 3 && port(5, kHotIn).z == 0);
     // Definitions file: four entries, four gas nodes each, the stock class, balanced braces.
-    bool built[4] = {true, true, false, true}, bov_built[2] = {false, true};
-    std::string json = definitions_json(built, bov_built);
+    bool built[4] = {true, true, false, true}, bov_built[2] = {false, true}, wg_built[2] = {true, false};
+    std::string json = definitions_json(built, bov_built, wg_built);
     size_t count = 0;
     for (size_t at = 0; (at = json.find("\"class\": \"gas_pump_centrifugal\"", at)) != std::string::npos; ++at) ++count;
-    assert(count == 7);
+    assert(count == 8);
+    assert(json.find("turbo_turbo_wastegate.mesh") != std::string::npos && json.find("turbo_turbo_wastegate_large.mesh") == std::string::npos &&
+           json.find("\"id\": \"turbo_wastegate_large\"") != std::string::npos);
     assert(json.find("\"id\": \"turbo_blow_off_valve_large\"") != std::string::npos && json.find("turbo_turbo_blow_off_valve_large.mesh") != std::string::npos &&
            json.find("turbo_turbo_blow_off_valve.mesh") == std::string::npos);
     assert(json.find("\"direction\": 5, \"type\": \"gas\", \"size\": 1}") != std::string::npos);   // the large valve's Air port is a large pipe
@@ -88,7 +91,9 @@ int main() {
     }
     assert(depth == 0 && square == 0 && !in_string);
     assert(json.find("\"id\": \"turbo_blow_off_valve\"") != std::string::npos && json.find("\"type_f64_input\", \"name\": \"open\"") != std::string::npos);
-    assert(valve_from_id("turbo_wastegate", 15) == kWastegate && valve_from_id("turbo_blow_off_valve", 20) == kBlowOff && valve_from_id("turbo_blow_off_valve_large", 26) == kBlowOffLarge && valve_from_id("turbo", 5) == kNoValve);
+    assert(valve_from_id("turbo_wastegate", 15) == kWastegate && valve_from_id("turbo_blow_off_valve", 20) == kBlowOff && valve_from_id("turbo_blow_off_valve_large", 26) == kBlowOffLarge && valve_from_id("turbo", 5) == kNoValve &&
+           valve_from_id("turbo_wastegate_large", 21) == kWastegateLarge);
+    assert(wastegate_move(1, 3, 1, 50, 50, 1.0 / 60, true) > wastegate_move(1, 3, 1, 50, 50, 1.0 / 60) * 2);   // the large wastegate flows more
     assert(valve_channel_index("open", 4) == kValveOpen && valve_channel_index("pressure", 8) == kValvePressure && valve_channel_index("x", 1) < 0);
     // Valves.
     assert(blow_off_vent(0.3, 5, 10, 1.0 / 60) == 0);                 // 2.9 kPa excess, under a 5 kPa spring
@@ -167,11 +172,25 @@ int main() {
         double c = (n - 1) * kCell / 2, s = n / 3.0;
         assert(near(v[0].pos[0], -0.04, 1e-6) && near(v[0].pos[1], c - 0.12 * s, 1e-5) && near(v[2].pos[2], c + 0.12 * s, 1e-5));
         assert(near(v[4].pos[0], kCell + 0.04, 1e-6) && near(v[4].pos[1], c + 0.12 * s, 1e-5) && near(v[4].normal[0], 1, 1e-6));
-        assert(v[0].rgba[0] == 200 && v[0].rgba[2] == 214 && v[4].rgba[0] == 156 && v[4].rgba[1] == 74 && v[7].rgba[0] == 51);
+        assert(v[0].rgba[0] == 153 && v[0].rgba[1] == 0 && v[4].rgba[0] == 153 && v[4].rgba[1] == 38 && v[7].rgba[0] == 51);   // paint markers 1 and 2
         // Cold outlet stub lands in the top cell on the +z face; hot inlet stub in the bottom cell on -z.
         assert(int(std::lround(v[3].pos[1] / kCell)) == port(n, kColdOut).y && near(v[3].pos[2], (n - 0.5) * kCell, 1e-5));
         assert(int(std::lround(v[7].pos[1] / kCell)) == port(n, kHotIn).y && near(v[7].pos[2], -0.5 * kCell, 1e-5));
     }
+    // Valve meshes: readable, inside their cells (the cap may rise a little), with both paint markers.
+    for (int large = 0; large < 2; ++large)
+        for (int wg = 0; wg < 2; ++wg) {
+            std::vector<uint8_t> mesh = wg ? build_wastegate_mesh(stock, large, "v") : build_blow_off_mesh(stock, large, "v");
+            MeshLayout m; assert(parse_mesh(mesh, m) && m.vertices > 100);
+            std::vector<MeshVertex> v(m.vertices); std::memcpy(v.data(), mesh.data() + m.vertex_bytes + 4, v.size() * sizeof(MeshVertex));
+            double lo = -kCell / 2 - 0.003, hi = (large ? 1.5 : 0.5) * kCell + 0.003;
+            bool paint0 = false, paint1 = false;
+            for (auto& p : v) {
+                for (int j = 0; j < 3; ++j) assert(p.pos[j] >= lo && p.pos[j] <= hi + (j == 1 ? 0.02 : 0.0));
+                paint0 = paint0 || (p.rgba[0] == 153 && p.rgba[1] == 0); paint1 = paint1 || (p.rgba[0] == 153 && p.rgba[1] == 38);
+            }
+            assert(paint0 && paint1);
+        }
     // Sounds: the replicated factor survives the one-byte trip, and every voice renders finite, audible audio.
     {
         auto byte = [](double f) { return std::round(f * 255.0) / 255.0; };
