@@ -229,6 +229,15 @@ void hk_tick(void* self, void* vehicle, void* scene) {
     Turbo& t = found->second;
     void* c0 = static_cast<uint8_t*>(self) + off::pump_content_0;
     void* c1 = static_cast<uint8_t*>(self) + off::pump_content_1;
+    // The compressor inlet is open to the air, like a real turbo's intake: top it up to ambient every tick. Game vents
+    // and filters only pass about 13.5 L/s, which starved the compressor in the first test. A pipe on the inlet still
+    // works (it can only add more air).
+    {
+        double capacity = at<double>(c0, off::content_capacity), volume = at<double>(c0, off::content_volume);
+        double missing = capacity - volume, temperature = kAmbientC;
+        int32_t air = kGasAir;
+        if (capacity > 0 && missing > 1e-6) g_content_modify(c0, &air, &missing, &temperature);
+    }
     void* contents[kNodeCount] = {c0, c1, t.hot ? t.hot->content[0] : nullptr, t.hot ? t.hot->content[1] : nullptr};
     Inputs in;
     for (int i = 0; i < kNodeCount; ++i) {

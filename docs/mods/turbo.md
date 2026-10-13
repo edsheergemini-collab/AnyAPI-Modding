@@ -12,7 +12,7 @@ cell is a heat-rust turbine housing, the same impeller mirrored.
 
 | Port | Where | Connect to |
 | --- | --- | --- |
-| Intake in (cold side) | Middle of the front face | Open air: a gas vent, or an air filter line |
+| Intake in (cold side) | Middle of the front face | Nothing needed: it draws from the open air. A pipe here can only add air. |
 | Boost out (cold side) | Top corner of the front housing, facing sideways | The engine's air intake |
 | Exhaust in (hot side) | Bottom corner of the back housing, facing the other way | The engine's exhaust |
 | Exhaust out (hot side) | Middle of the back face | A gas vent (the tailpipe) |
@@ -21,7 +21,7 @@ Exhaust flowing from the hot inlet to the hot outlet spins the shaft. The shaft'
 the cold side pushes into the engine's intake. Engines already turn intake pressure into power: ambient gives
 1x, and an intake pressure of 98 kPa (the game's scale) gives the full 2x.
 
-Turbos 4x4 and 5x5 use large pipes; 2x2 and 3x3 use small pipes. No gas tank is needed.
+Turbos 4x4 and 5x5 use large pipes; 2x2 and 3x3 use small pipes. No gas tank is needed. The compressor inlet is open to the air like a real turbo intake, because the game's vents and filters only pass about 13.5 L/s, far less than a spooled turbo draws.
 
 ## Sizes and lag
 
