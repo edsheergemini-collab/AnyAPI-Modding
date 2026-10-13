@@ -106,6 +106,7 @@ struct Turbo {
     State state;
     double last_log = -1e9;
     int ticks = 0;
+    double boost = 0;                                // cold outlet minus cold inlet, game pressure units (tooltip)
 };
 std::unordered_map<const void*, Turbo> g_turbos;     // keyed by server component; nodes keep their address
 std::unordered_map<const void*, int> g_definition_size;   // definition pointer -> 2-5, or 0 for other parts
@@ -256,6 +257,7 @@ void hk_tick(void* self, void* vehicle, void* scene) {
     at<double>(self, off::pump_pressure) = o.head;
     at<double>(self, off::pump_display_power) = o.power;
     at<double>(self, off::pump_flow) = o.compressor_move;
+    t.boost = std::max(0.0, in.pressure[kColdOut] - in.pressure[kColdIn]);
     double sound = t.state.spool;
     g_property_set(static_cast<uint8_t*>(self) + off::pump_factor_speed, &sound);
     // Diagnostics for tuning: the first tick, then every 5 s per turbo while gas moves or any port is off ambient,
@@ -285,6 +287,55 @@ void hk_get_f64(double** ret, void* self, const anymaker::gc_string_view* name) 
     *ret = &found->second.state.slots[i];
     static std::atomic<int> logs{8};
     if (logs.fetch_sub(1) > 0) log(0, "data channel %s connected", kChannels[i].name);
+}
+
+// ------------------------------------------------------------------------------------- tooltip
+// The stock impeller tooltip shows flow, its shaft's speed (always 0 on a turbo: nothing drives the shaft) and power.
+// A turbo shows its own: intake flow, turbine speed from the spool, and boost, formatted by the game's own units
+// (so boost reads in kPa or psi like every other pressure in the game).
+using build_tooltip_t = void (*)(void* self, void* data);
+using units_t = void (*)(anymaker::gc_string_view* ret, const double* value);
+using to_pascals_t = void (*)(double* ret, const double* value);
+using add_entry_t = void (*)(void* data, const int32_t* label, const anymaker::gc_string_view* value, const int32_t* icon, const int32_t* color);
+anymaker::cell_hook h_tooltip;
+build_tooltip_t g_component_tooltip;
+units_t g_units_flow, g_units_frequency, g_units_pressure;
+to_pascals_t g_to_pascals;
+self_fn_t g_string_dtor;
+constexpr int kAddTooltipEntrySlot = 68;             // server_scene.peer.inspection_data.vehicle method table
+enum : int32_t { kLocSpeed = 197, kLocFlow = 207, kLocBoost = 234 };            // e_localization_string
+enum : int32_t { kIconFlow = 16, kIconPressure = 30, kIconSpeed = 33 };         // inspection_util.e_tooltip_icon
+
+void add_entry(void* data, add_entry_t add, int32_t label, int32_t icon, units_t format, double value) {
+    anymaker::gc_string_view text{};
+    g_string_ctor(&text, "");                        // a valid empty string, as the stock builder's $string_ctor gives
+    format(&text, &value);
+    int32_t color = 0;
+    add(data, &label, &text, &icon, &color);
+    g_string_dtor(&text);
+}
+
+void hk_tooltip(void* self, void* data) {
+    double flow = 0, rps = 0, boost = 0;
+    bool turbo = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_mutex);
+        auto found = g_turbos.find(self);
+        if (found != g_turbos.end()) {
+            turbo = true;
+            flow = found->second.state.intake_flow;
+            rps = found->second.state.spool * found->second.spec.max_rpm / 60.0;
+            boost = found->second.boost;
+        }
+    }
+    auto add = turbo && data ? reinterpret_cast<add_entry_t>(container_method(data, kAddTooltipEntrySlot)) : nullptr;
+    if (!add) { reinterpret_cast<build_tooltip_t>(h_tooltip.original)(self, data); return; }
+    g_component_tooltip(self, data);
+    double pascals = 0;
+    g_to_pascals(&pascals, &boost);
+    add_entry(data, add, kLocFlow, kIconFlow, g_units_flow, flow);
+    add_entry(data, add, kLocSpeed, kIconSpeed, g_units_frequency, rps);
+    add_entry(data, add, kLocBoost, kIconPressure, g_units_pressure, pascals);
 }
 
 // ------------------------------------------------------------------------------------- part definitions
@@ -444,6 +495,14 @@ void install_hooks() {
         g_content_ctor = cctor; g_content_dtor = cdtor; g_node_ctor = nctor; g_node_dtor = ndtor;
         g_content_create = ccreate; g_content_modify = cmodify; g_content_move = cmove; g_property_set = pset; g_string_ctor = sc;
         g_delta_time = dt && anymaker::readable(dt, 8) ? dt : nullptr;
+        void** tooltip = hook_cell(bind::centrifugal_build_tooltip);
+        g_component_tooltip = reinterpret_cast<build_tooltip_t>(function(bind::component_build_tooltip));
+        g_units_flow = reinterpret_cast<units_t>(function(bind::units_flow));
+        g_units_frequency = reinterpret_cast<units_t>(function(bind::units_frequency));
+        g_units_pressure = reinterpret_cast<units_t>(function(bind::units_pressure));
+        g_to_pascals = reinterpret_cast<to_pascals_t>(function(bind::pressure_to_pascals));
+        g_string_dtor = reinterpret_cast<self_fn_t>(native(anymaker::sym::string_dtor_rva));
+        bool tooltip_ok = tooltip && g_component_tooltip && g_units_flow && g_units_frequency && g_units_pressure && g_to_pascals && g_string_dtor;
         g_create_node_bound = reinterpret_cast<create_node_t>(function(bind::gas_container_create_node));
         g_get_definition = reinterpret_cast<get_definition_t>(function(bind::definitions_get_by_id));
         if (!g_get_definition) log(1, "definition lookup not found; Turbo may add its parts twice if another mod re-adds definitions");
@@ -452,6 +511,9 @@ void install_hooks() {
                   h_tick.install(tick, (void*)&hk_tick) && h_get_f64.install(get, (void*)&hk_get_f64) &&
                   h_add_definitions.install(add, (void*)&hk_add_definitions);
         if (!ok) { log(2, "a hook cell was already taken or not writable; Turbo is off"); return; }
+        if (!tooltip_ok || !h_tooltip.install(tooltip, (void*)&hk_tooltip))
+            log(1, "turbo tooltip unavailable (tooltip=%d base=%d units=%d/%d/%d pascals=%d string=%d); turbos show the stock impeller tooltip",
+                !!tooltip, !!g_component_tooltip, !!g_units_flow, !!g_units_frequency, !!g_units_pressure, !!g_to_pascals, !!g_string_dtor);
         g_ready = true;
         log(0, "Ready after %d s (server tick %s). Load or start a world to add the Turbo parts (definitions %s).", attempt,
             g_delta_time ? "found" : "not found, assuming 60 Hz", g_json_path.c_str());
@@ -460,6 +522,7 @@ void install_hooks() {
 }
 void remove_hooks() {
     h_add_definitions.remove((void*)&hk_add_definitions);
+    h_tooltip.remove((void*)&hk_tooltip);
     h_get_f64.remove((void*)&hk_get_f64);
     h_tick.remove((void*)&hk_tick);
     h_create.remove((void*)&hk_create);

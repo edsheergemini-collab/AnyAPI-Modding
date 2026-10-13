@@ -39,6 +39,11 @@ building at a quarter of that flow and reaches full boost at the rated flow. Big
 A turbo that is too small for its engine chokes it: exhaust backs up, and above 39 kPa of exhaust pressure the
 engine loses power, as it does with any restricted exhaust. A turbo that is too big barely spools.
 
+## Tooltip
+
+Looking at a turbo shows its intake flow, turbine speed and boost (the pressure it adds over the intake), in the
+game's own units.
+
 ## Data channels
 
 Wire them from a data port, a data link or a microcontroller. Pressures use the game's kPa scale (9.8 per unit).
@@ -68,7 +73,7 @@ Wire them from a data port, a data link or a microcontroller. Pressures use the 
 - The meshes are built at start-up from the game's `rom/meshes/components/turbo_a.mesh` and written beside it as
   `turbo_turbocharger_N.mesh` ([`turbo_mesh.h`](../../native/turbo_mesh.h)). If the stock mesh is not in the
   expected format, that size uses the plain impeller look.
-- The impeller's server create, destroy, tick and `get_data_f64` are hooked. When a turbo is created, the mod
+- The impeller's server create, destroy, tick, tooltip and `get_data_f64` are hooked. When a turbo is created, the mod
   creates its hot side with the game's own functions: two gas contents and two gas nodes registered in the
   vehicle, so pipes and pressure treat them like any other port. Stock impellers are untouched.
 - Each tick the turbo lets exhaust through its hot side in proportion to the pressure drop, spools from that
