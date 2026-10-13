@@ -99,6 +99,19 @@ int main() {
     assert(blow_off_vent(0.3, 5, 10, 1.0 / 60) == 0);                 // 2.9 kPa excess, under a 5 kPa spring
     assert(blow_off_vent(1.0, 5, 10, 1.0 / 60) > 0.9);                // 9.8 kPa excess vents
     assert(blow_off_vent(1.0, 5, 0.2, 1.0 / 60) <= 0.2);              // never more than the inlet holds
+    // Off throttle: a puff every few ticks as the spool eases down never shows the valve open; a real dump does.
+    {
+        double flow = 0; bool shown = false;
+        for (int i = 0; i < 600; ++i) {
+            double litres = i % 6 == 0 ? blow_off_vent(0.53, 5, 10, 1.0 / 60) : 0;
+            flow += (litres * 60 - flow) * (1.0 / 60 / 0.15);
+            shown = shown || blow_off_shows_open(true, flow);
+        }
+        assert(!shown);
+        flow = 0;
+        for (int i = 0; i < 10; ++i) flow += (blow_off_vent(2.0, 5, 10, 1.0 / 60) * 60 - flow) * (1.0 / 60 / 0.15);
+        assert(blow_off_shows_open(true, flow) && !blow_off_shows_open(false, flow));
+    }
     assert(blow_off_vent(1.0, 5, 50, 1.0 / 60, true) > blow_off_vent(1.0, 5, 50, 1.0 / 60) * 2);   // the large valve vents faster
     assert(wastegate_move(0, 3, 1, 5, 5, 1.0 / 60) == 0 && wastegate_move(1, 3, 1, 5, 5, 1.0 / 60) > 1.0 && wastegate_move(0.5, 3, 1, 5, 5, 1.0 / 60) < wastegate_move(1, 3, 1, 5, 5, 1.0 / 60));
     assert(wastegate_move(1, 1, 3, 5, 5, 1.0 / 60) < 0 && std::isfinite(wastegate_move(NAN, NAN, 1, 5, 5, 1.0 / 60)));
@@ -230,6 +243,10 @@ int main() {
             Synth bov; bov.voice = Voice::kBlowOff; bov.sound = k; bov.size = z; assert(peak(bov, 0, false, 4800) == 0);
             int whoosh = peak(bov, 1, true, 4800); assert(whoosh > 3000);
             peak(bov, 0, false, 5 * 48000); assert(peak(bov, 0, false, 4800) < 50);   // the tail dies away
+            // Held open with next to no air going out (off throttle, the boost all but gone): the burst, then quiet.
+            Synth held; held.voice = Voice::kBlowOff; held.sound = k; held.size = z;
+            assert(peak(held, 0, true, 4800) > 3000);
+            peak(held, 0, true, 5 * 48000); assert(peak(held, 0, true, 4800) < 50);
           }
         }
         for (int z = kMinSize; z <= kMaxSize; ++z) {         // antilag bangs: silent until it fires, loud bangs, dies away

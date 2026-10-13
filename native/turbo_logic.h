@@ -290,6 +290,11 @@ constexpr double kBlowOffCoeff = 60.0;          // L/s per unit of excess boost 
 constexpr double kBlowOffLargeFactor = 2.5;
 constexpr double kWastegateCoeff = 40.0;        // L/s per unit of pressure drop, fully open (small; large x2.5)
 constexpr double kBlowOffDefaultKpa = 5.0;      // spring setting: excess boost (kPa) before it opens
+// Off throttle the spool keeps easing down towards idle, so the trapped boost keeps creeping a hair over the
+// spring and the valve lets out a puff now and then for as long as the throttle stays shut. Those puffs still
+// stop the surge, but the valve only counts as open (sound and the `open` output) while it really dumps air.
+constexpr double kBlowOffAudibleLps = 8.0;
+inline bool blow_off_shows_open(bool vented_recently, double flow_lps) { return vented_recently && flow_lps > kBlowOffAudibleLps; }
 constexpr double kBlowOffMaxKpa = 50.0;
 inline Valve valve_from_id(const char* id, size_t length) {
     auto is = [&](const char* want) { return std::char_traits<char>::length(want) == length && std::char_traits<char>::compare(want, id, length) == 0; };

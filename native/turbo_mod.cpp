@@ -454,7 +454,6 @@ void tick_valve(void* self, int kind) {
         litres = v.vented;
         v.vented = 0;
         v.vented_by = nullptr;
-        v.state.slots[kValveOpen] = now_seconds() < v.open_until ? 1.0 : 0.0;
     } else {
         double move = wastegate_move(v.state.slots[kValveOpen], pressure_of(c0), pressure_of(c1), at<double>(c0, off::content_volume), at<double>(c1, off::content_volume), dt,
                                      kind == kKindWastegateLarge);
@@ -463,6 +462,7 @@ void tick_valve(void* self, int kind) {
         litres = std::abs(move);
     }
     v.state.flow += (litres / dt - v.state.flow) * std::min(1.0, dt / 0.15);
+    if (is_blow_off(kind)) v.state.slots[kValveOpen] = blow_off_shows_open(now_seconds() < v.open_until, v.state.flow) ? 1.0 : 0.0;
     v.state.slots[kValveFlow] = v.state.flow;
     v.state.slots[kValvePressure] = pressure_of(c0) * kKpaPerUnit;
     at<double>(self, off::pump_pressure) = 0;

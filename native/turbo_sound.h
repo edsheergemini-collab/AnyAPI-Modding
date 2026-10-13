@@ -115,7 +115,7 @@ struct Synth {
     double spool = 0, pitch = 0, phase1 = 0, phase2 = 0;
     double surge_env = 0, surge_age = 0, surge_clock = 1, pulse_age = 1, pulse_gain = 0, pulse_period = 0.07;
     double whoosh_env = 0;
-    double flutter_phase = 0, flutter_rate = 32, flutter_depth = 0.6, pop_age = 1;
+    double flutter_phase = 0, flutter_rate = 32, flutter_depth = 0.6, pop_age = 1, open_age = 0;
     double bang_env = 0, bang_clock = 1, bang_age = 1, bang_gain = 0, bang_period = 0.1, bang_pitch = 90, thump_phase = 0, crackle_age = 1;
     bool was_open = false;
     uint32_t rng = 0x12345678u;
@@ -218,12 +218,17 @@ inline void render(Synth& s, double level, bool flag, int16_t* out, int n) {
             //   Flutter: the same air chopped by the valve chattering on its seat (25-45 Hz, wandering): "brrrrsh".
             //   Chirp:   a sharp falling "tsu" as it cracks open, then the air.
             //   Dump:    a big, deep, longer "whoomph".
-            if (flag && !s.was_open) { s.whoosh_env = 1.0; s.pop_age = 0; }
+            if (flag && !s.was_open) { s.whoosh_env = 1.0; s.pop_age = 0; s.open_age = 0; }
             s.was_open = flag;
+            s.open_age += dt;
             bool dump = s.sound == kDump;
-            double hold = flag ? 0.55 + 0.45 * target : 0.0;
+            // Held open, the air follows how hard it vents and settles down as the boost bleeds away.
+            double hold = flag ? std::sqrt(target) * (0.35 + 0.65 * std::exp(-s.open_age / (2.0 * bov_length))) : 0.0;
             if (s.whoosh_env < hold) s.whoosh_env += (hold - s.whoosh_env) * (1.0 - std::exp(-dt / 0.01));
-            else s.whoosh_env *= std::exp(-dt / (bov_length * (flag ? (dump ? 0.9 : 0.6) : (dump ? 0.45 : 0.28))));
+            else {   // the burst holds for about its length, then tails off like a shut valve down to what it still vents
+                bool burst = flag && s.open_age < bov_length;
+                s.whoosh_env = hold + (s.whoosh_env - hold) * std::exp(-dt / (bov_length * (burst ? (dump ? 0.9 : 0.6) : (dump ? 0.45 : 0.28))));
+            }
             double nz = s.noise();
             double air = dump ? 0.35 * s.whoosh.run(nz) + 0.55 * s.whoosh_low.run(nz) + 0.6 * s.rumble.run(nz)
                               : 0.55 * s.whoosh.run(nz) + 0.30 * s.whoosh_low.run(nz);
