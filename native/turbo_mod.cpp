@@ -23,6 +23,7 @@
 #include "turbo_logic.h"
 #include "turbo_mesh.h"
 #include "turbo_sound.h"
+#include "turbo_valve_mesh.h"
 #include <atomic>
 #include <cstdarg>
 #include <cstdio>
@@ -66,6 +67,7 @@ constexpr ptrdiff_t content_volume = 32;             // vehicle_gas_content.m_vo
 constexpr ptrdiff_t content_capacity = 40;           // m_capacity (f64, litres)
 constexpr ptrdiff_t content_temperature = 48;        // m_temperature (f64, C)
 constexpr ptrdiff_t node_component = 0;              // vehicle_gas_node.m_component
+constexpr ptrdiff_t node_component_flood = 8;        // vehicle_gas_node.m_component_flood (asked which nodes it floods to)
 constexpr ptrdiff_t node_island = 48;                // vehicle_gas_node.m_island (ptr<vehicle_gas_island>; its m_nodes vector at +0)
 constexpr ptrdiff_t node_node_index = 20;
 constexpr ptrdiff_t client_definition = 176;         // client_scene.vehicle_component.m_definition
@@ -99,6 +101,11 @@ create_node_t g_create_node_bound;   // located by code; cross-checked against t
 property_set_t g_property_set;
 string_ctor_t g_string_ctor;
 get_definition_t g_get_definition;
+// Inline blow-off valves: the island flood joins both their ports into one pipe (see hk_flood). Off if the
+// two-node flood function was not found; the valve then evens out its two sides every tick instead.
+using flood_nodes_t = void (*)(void* self, void* out_nodes);
+flood_nodes_t g_two_node_flood;
+bool g_bov_inline;
 const double* g_delta_time;
 
 // ------------------------------------------------------------------------------------- per-turbo state
@@ -126,6 +133,7 @@ struct ValvePart {
                                                       // never freed (the Properties Tool holds pointers to them)
     double vented = 0;                                // litres the turbos vented through it since its last tick
     double open_until = 0;                            // seconds (now_seconds) it shows open after venting
+    const void* vented_by = nullptr;                  // the turbo that vented through it since its last tick
     int vent_size = 3;                                // size of the turbo that last vented through it (its sound)
 };
 std::unordered_map<const void*, ValvePart> g_valves;
@@ -139,9 +147,11 @@ double now_seconds() {
     return double(t.QuadPart) / double(freq.QuadPart);
 }
 
-// What a gas_pump_centrifugal component is: 2-5 a turbo of that size, kKindBlowOff / kKindWastegate a valve,
+// What a gas_pump_centrifugal component is: 2-5 a turbo of that size, kKindBlowOff(Large) / kKindWastegate a valve,
 // 0 a stock impeller.
-constexpr int kKindBlowOff = 10, kKindWastegate = 11;
+constexpr int kKindBlowOff = 10, kKindWastegate = 11, kKindBlowOffLarge = 12;
+bool is_blow_off(int kind) { return kind == kKindBlowOff || kind == kKindBlowOffLarge; }
+bool is_valve(int kind) { return is_blow_off(kind) || kind == kKindWastegate; }
 int kind_of_definition(const void* definition) {
     if (!definition) return 0;
     auto found = g_definition_size.find(definition);
@@ -153,6 +163,7 @@ int kind_of_definition(const void* definition) {
             n = size_from_id(id.data, size_t(id.length));
             Valve v = valve_from_id(id.data, size_t(id.length));
             if (v == kBlowOff) n = kKindBlowOff;
+            else if (v == kBlowOffLarge) n = kKindBlowOffLarge;
             else if (v == kWastegate) n = kKindWastegate;
         }
     }
@@ -235,6 +246,19 @@ void hold_ambient(void* content) {
     }
 }
 
+// Removes `litres` from a content, from every gas in proportion.
+void remove_volume(void* content, double litres) {
+    double volume = at<double>(content, off::content_volume);
+    if (!(litres > 0) || !(volume > 0) || !std::isfinite(volume)) return;
+    litres = std::min(litres, volume);
+    const double* amounts = at<const double*>(content, off::content_amounts);
+    int32_t count = at<int32_t>(content, off::content_amounts + 8);
+    if (!amounts || count <= 0 || count > 8 || !anymaker::readable(amounts, sizeof(double) * size_t(count))) return;
+    double removal[8]{}, temperature = kAmbientC;
+    for (int32_t i = 0; i < count; ++i) removal[i] = -litres * std::max(0.0, amounts[i]) / volume;
+    for (int32_t i = 0; i < count; ++i) if (removal[i] < 0) g_content_modify(content, &i, &removal[i], &temperature);
+}
+
 // ------------------------------------------------------------------------------------- impeller hooks
 using create_t = void (*)(void* self, void* vehicle);
 using destroy_t = void (*)(void* self, void* vehicle, void* scene);
@@ -256,13 +280,18 @@ void hk_create(void* self, void* vehicle) {
     if (!self || !vehicle) return;
     std::lock_guard<std::recursive_mutex> lock(g_mutex);
     int kind = part_kind(self);
-    if (kind == kKindBlowOff || kind == kKindWastegate) {
+    if (is_valve(kind)) {
         ValvePart& v = g_valves[self];
         v.kind = kind;
         valve_setting(v);
+        if (is_blow_off(kind) && g_bov_inline) {
+            // Make both gas nodes ask this component which nodes they flood to (hk_flood joins them).
+            at<void*>(static_cast<uint8_t*>(self) + off::pump_node_a, off::node_component_flood) = self;
+            at<void*>(static_cast<uint8_t*>(self) + off::pump_node_b, off::node_component_flood) = self;
+        }
         static std::atomic<int> logs{8};
         if (logs.fetch_sub(1) > 0)
-            log(0, "%s created (component %d): contents %.2f/%.2f L", kind == kKindBlowOff ? "Blow-off valve" : "Wastegate", at<int32_t>(self, off::component_id),
+            log(0, "%s created (component %d): contents %.2f/%.2f L", is_blow_off(kind) ? "Blow-off valve" : "Wastegate", at<int32_t>(self, off::component_id),
                 at<double>(self, off::pump_content_0 + off::content_capacity), at<double>(self, off::pump_content_1 + off::content_capacity));
         return;
     }
@@ -287,6 +316,22 @@ void hk_destroy(void* self, void* vehicle, void* scene) {
         g_valves.erase(self);
     }
     reinterpret_cast<destroy_t>(h_destroy.original)(self, vehicle, scene);
+}
+
+// Every component's get_gas_flood_nodes shares this one cell (the base is empty; pipes and brackets override it).
+// A blow-off valve answers with both its gas nodes, so the boost pipe runs straight through it to the intake.
+using flood_t = void (*)(void* self, void* out_nodes);
+anymaker::cell_hook h_flood;
+void hk_flood(void* self, void* out_nodes) {
+    reinterpret_cast<flood_t>(h_flood.original)(self, out_nodes);
+    bool valve = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_mutex);
+        auto found = g_valves.find(self);
+        valve = found != g_valves.end() && is_blow_off(found->second.kind);
+    }
+    if (valve && g_two_node_flood)
+        g_two_node_flood(static_cast<uint8_t*>(self) + off::pump_node_a - bind::kTwoNodeFloodFirst, out_nodes);
 }
 
 // ------------------------------------------------------------------------------------- valves
@@ -319,14 +364,16 @@ bool vent_blow_off_valves(void* turbo, int size, double excess, double dt) {
     for_each_on_island(static_cast<uint8_t*>(turbo) + off::pump_node_b, [&](void* node) {
         void* component = at<void*>(node, off::node_component);
         auto found = g_valves.find(component);
-        if (found == g_valves.end() || found->second.kind != kKindBlowOff) return;
-        if (node != static_cast<uint8_t*>(component) + off::pump_node_a) return;   // only its inlet (bottom) port
+        if (found == g_valves.end() || !is_blow_off(found->second.kind)) return;
+        // Inline valves join the boost pipe through both ports; the old layout only through its inlet.
+        if (!g_bov_inline && node != static_cast<uint8_t*>(component) + off::pump_node_a) return;
+        if (found->second.vented_by) return;          // once per tick (an inline valve shows up through both ports)
         void* in = static_cast<uint8_t*>(component) + off::pump_content_0;
-        void* out = static_cast<uint8_t*>(component) + off::pump_content_1;
         double setting = found->second.setting ? *found->second.setting : kBlowOffDefaultKpa;
-        double want = blow_off_vent(excess, setting, at<double>(in, off::content_volume), dt);
+        double want = blow_off_vent(excess, setting, at<double>(in, off::content_volume), dt, found->second.kind == kKindBlowOffLarge);
         if (want <= 0) return;
-        g_content_move(in, out, &want);
+        remove_volume(in, want);                      // out through the cap, to the air
+        found->second.vented_by = turbo;
         found->second.vented += want;
         found->second.vent_size = size;
         found->second.open_until = now + 0.3;
@@ -342,10 +389,21 @@ void tick_valve(void* self, int kind) {
     void* c1 = static_cast<uint8_t*>(self) + off::pump_content_1;
     double dt = g_delta_time && std::isfinite(*g_delta_time) && *g_delta_time > 0 ? *g_delta_time : 1.0 / 60.0;
     double litres = 0;
-    if (kind == kKindBlowOff) {
-        hold_ambient(c1);                             // the outlet is open to the air
+    if (is_blow_off(kind)) {
+        // Inline: the gas passes straight through (both ports are one pipe, see hk_flood). Evening out the two
+        // sides as well costs nothing when they are already one pipe, and passes the gas if they are not.
+        {
+            double c0cap = at<double>(c0, off::content_capacity), c1cap = at<double>(c1, off::content_capacity);
+            double v0 = at<double>(c0, off::content_volume), v1 = at<double>(c1, off::content_volume);
+            if (c0cap > 0 && c1cap > 0) {
+                double move = (v0 * c1cap - v1 * c0cap) / (c0cap + c1cap);
+                if (move > 1e-9) g_content_move(c0, c1, &move);
+                else if (move < -1e-9) { double back = -move; g_content_move(c1, c0, &back); }
+            }
+        }
         litres = v.vented;
         v.vented = 0;
+        v.vented_by = nullptr;
         v.state.slots[kValveOpen] = now_seconds() < v.open_until ? 1.0 : 0.0;
     } else {
         double move = wastegate_move(v.state.slots[kValveOpen], pressure_of(c0), pressure_of(c1), at<double>(c0, off::content_volume), at<double>(c1, off::content_volume), dt);
@@ -360,7 +418,7 @@ void tick_valve(void* self, int kind) {
     at<double>(self, off::pump_display_power) = 0;
     at<double>(self, off::pump_flow) = litres;
     int style = v.setting && std::isfinite(v.setting[1]) ? int(std::lround(v.setting[1])) : kWhoosh;
-    double sound = kind == kKindBlowOff ? encode_blow_off_factor(v.state.slots[kValveOpen] > 0.5, v.state.flow / 60.0, style, v.vent_size) : 0.0;
+    double sound = is_blow_off(kind) ? encode_blow_off_factor(v.state.slots[kValveOpen] > 0.5, v.state.flow / 60.0, style, v.vent_size) : 0.0;
     g_property_set(static_cast<uint8_t*>(self) + off::pump_factor_speed, &sound);
 }
 
@@ -368,7 +426,7 @@ void hk_tick(void* self, void* vehicle, void* scene) {
     if (!self) return;
     std::unique_lock<std::recursive_mutex> lock(g_mutex);
     int kind = part_kind(self);
-    if (kind == kKindBlowOff || kind == kKindWastegate) { tick_valve(self, kind); return; }
+    if (is_valve(kind)) { tick_valve(self, kind); return; }
     if (!turbo_size(self)) { lock.unlock(); reinterpret_cast<tick_t>(h_tick.original)(self, vehicle, scene); return; }
     auto found = g_turbos.find(self);
     if (found == g_turbos.end()) {                  // placed before the hooks were in: no hot side, no boost
@@ -526,7 +584,7 @@ void hk_properties(void* self, void* properties) {
     {
         std::lock_guard<std::recursive_mutex> lock(g_mutex);
         auto v = g_valves.find(self);
-        if (v != g_valves.end() && v->second.kind == kKindBlowOff) setting = v->second.setting;
+        if (v != g_valves.end() && is_blow_off(v->second.kind)) setting = v->second.setting;
     }
     if (!setting || !properties) return;
     auto add = reinterpret_cast<add_f64_range_t>(container_method(properties, kAddPropertyF64RangeSlot));
@@ -554,9 +612,10 @@ void hk_parse_save(void* self, void* parser) {
     double* setting = nullptr;
     {
         std::lock_guard<std::recursive_mutex> lock(g_mutex);
-        if (part_kind(self) != kKindBlowOff) return;
+        int kind = part_kind(self);
+        if (!is_blow_off(kind)) return;
         ValvePart& v = g_valves[self];
-        v.kind = kKindBlowOff;
+        v.kind = kind;
         setting = valve_setting(v);
     }
     if (!setting) return;
@@ -608,7 +667,7 @@ bool write_file(const std::wstring& path, const void* data, size_t size) {
     return ok;
 }
 
-// Writes the four meshes into rom/meshes/components (where the game loads part meshes) and the definitions file
+// Writes the turbo and blow-off valve meshes into rom/meshes/components (where the game loads part meshes) and the definitions file
 // into "AnyAPI and Modding/Turbo".
 bool write_definition_file() {
     HMODULE self = nullptr;
@@ -629,10 +688,20 @@ bool write_definition_file() {
         built[n - kMinSize] = !mesh.empty() && write_file(file, mesh.data(), mesh.size());
     }
     if (!built[0] || !built[3]) log(1, "impeller mesh not recognised or not writable (%zu bytes); some turbos use the stock impeller look", stock.size());
+    bool bov_built[2]{};
+    for (int large = 0; large < 2; ++large) {
+        std::string path = blow_off_mesh_path(large != 0);              // meshes/components/turbo_<id>.mesh
+        std::string name = path.substr(path.find_last_of('/') + 1);
+        name = name.substr(0, name.size() - 5);
+        std::vector<uint8_t> mesh = build_blow_off_mesh(stock, large != 0, name.c_str());
+        std::wstring file = components + std::wstring(name.begin(), name.end()) + L".mesh";
+        bov_built[large] = !mesh.empty() && write_file(file, mesh.data(), mesh.size());
+    }
+    if (!bov_built[0] || !bov_built[1]) log(1, "blow-off valve meshes not written; the valves use the stock impeller look");
     dir += L"\\Turbo";
     CreateDirectoryW(dir.c_str(), nullptr);
     std::wstring file = dir + L"\\turbochargers.json";
-    std::string json = definitions_json(built);
+    std::string json = definitions_json(built, bov_built);
     bool ok = write_file(file, json.data(), json.size());
     int n = WideCharToMultiByte(CP_UTF8, 0, file.c_str(), -1, nullptr, 0, nullptr, nullptr);
     g_json_path.assign(size_t(n > 0 ? n - 1 : 0), '\0');
@@ -740,7 +809,7 @@ void stream_sound(void* self, int kind, const double* dt) {
     v.last_tick = now;
     double factor = at<double>(self, off::client_factor_speed), level = 0;
     bool flag = false;
-    if (kind == kKindBlowOff) {
+    if (is_blow_off(kind)) {
         v.synth.voice = Voice::kBlowOff;
         decode_blow_off_factor(factor, flag, level, v.synth.sound, v.synth.size);
     } else {
@@ -823,6 +892,23 @@ bool destroy_slot_matches(void* destroy_entry) {
 }
 
 // Sounds are optional: without them the parts keep the stock impeller hum.
+// The base get_gas_flood_nodes is 18 bytes of nothing (no unique code), so its cell is checked by those bytes; the
+// two-node function by its whole code, which must point at our layout (its second node 0x40 after the first).
+void install_inline_valves() {
+    static const uint8_t kEmptyFlood[] = {0x48, 0x83, 0xec, 0x18, 0x48, 0x89, 0x0c, 0x24, 0x48, 0x89, 0x54, 0x24, 0x08, 0x48, 0x83, 0xc4, 0x18, 0xc3};
+    static_assert(off::pump_node_b - off::pump_node_a == 0x220 - bind::kTwoNodeFloodFirst, "the two-node function reads nodes 0x40 apart");
+    uint8_t* hits[4]{};
+    size_t n = anymaker::find_gcl_functions(bind::kTwoNodeFloodCode, hits, 4);
+    void** cell = anymaker::experimental::hook_cell(bind::component_get_gas_flood_nodes);
+    bool empty = cell && *cell && anymaker::readable(*cell, sizeof kEmptyFlood) && std::memcmp(*cell, kEmptyFlood, sizeof kEmptyFlood) == 0;
+    if (n && empty) {
+        g_two_node_flood = reinterpret_cast<flood_nodes_t>(hits[0]);
+        g_bov_inline = h_flood.install(cell, (void*)&hk_flood);
+    }
+    if (!g_bov_inline)
+        log(1, "inline blow-off valves pass gas by levelling their two sides (flood hook: code %zu, cell %d, empty %d)", n, !!cell, empty);
+}
+
 void install_sound() {
     using namespace anymaker::experimental;
     void** cell = hook_cell(bind::client_centrifugal_tick);
@@ -906,6 +992,7 @@ void install_hooks() {
         if (!tooltip_ok || !h_tooltip.install(tooltip, (void*)&hk_tooltip))
             log(1, "turbo tooltip unavailable (tooltip=%d base=%d units=%d/%d/%d pascals=%d string=%d); turbos show the stock impeller tooltip",
                 !!tooltip, !!g_component_tooltip, !!g_units_flow, !!g_units_frequency, !!g_units_pressure, !!g_to_pascals, !!g_string_dtor);
+        install_inline_valves();
         install_sound();
         g_ready = true;
         log(0, "Ready after %d s (server tick %s). Load or start a world to add the Turbo parts (definitions %s).", attempt,
@@ -916,6 +1003,7 @@ void install_hooks() {
 void remove_hooks() {
     h_client_tick.remove((void*)&hk_client_tick);
     h_add_definitions.remove((void*)&hk_add_definitions);
+    h_flood.remove((void*)&hk_flood);
     h_properties.remove((void*)&hk_properties);
     h_parse_save.remove((void*)&hk_parse_save);
     h_tooltip.remove((void*)&hk_tooltip);

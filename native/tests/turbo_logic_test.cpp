@@ -69,11 +69,14 @@ int main() {
         for (int k = 0; k < kNodeCount; ++k) { Port p = port(n, Node(k)); assert(p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y < n && p.z >= 0 && p.z < n); }
     assert(port(3, kColdIn).dir == 0 && port(3, kHotOut).dir == 1 && port(3, kColdIn).y == 1 && port(4, kColdOut).y == 3 && port(5, kHotIn).z == 0);
     // Definitions file: four entries, four gas nodes each, the stock class, balanced braces.
-    bool built[4] = {true, true, false, true};
-    std::string json = definitions_json(built);
+    bool built[4] = {true, true, false, true}, bov_built[2] = {false, true};
+    std::string json = definitions_json(built, bov_built);
     size_t count = 0;
     for (size_t at = 0; (at = json.find("\"class\": \"gas_pump_centrifugal\"", at)) != std::string::npos; ++at) ++count;
-    assert(count == 6);
+    assert(count == 7);
+    assert(json.find("\"id\": \"turbo_blow_off_valve_large\"") != std::string::npos && json.find("turbo_turbo_blow_off_valve_large.mesh") != std::string::npos &&
+           json.find("turbo_turbo_blow_off_valve.mesh") == std::string::npos);
+    assert(json.find("\"direction\": 5, \"type\": \"gas\", \"size\": 1}") != std::string::npos);   // the large valve's Air port is a large pipe
     assert(json.find("turbo_turbocharger_2.mesh") != std::string::npos && json.find("turbo_turbocharger_4.mesh") == std::string::npos && json.find("turbo_a.mesh") != std::string::npos);
     assert(json.find("\"name\": \"Turbo 5x5\"") != std::string::npos && json.find("\"type_f64_input\", \"name\": \"boost_limit\"") != std::string::npos);
     int depth = 0, square = 0; bool in_string = false;
@@ -85,12 +88,13 @@ int main() {
     }
     assert(depth == 0 && square == 0 && !in_string);
     assert(json.find("\"id\": \"turbo_blow_off_valve\"") != std::string::npos && json.find("\"type_f64_input\", \"name\": \"open\"") != std::string::npos);
-    assert(valve_from_id("turbo_wastegate", 15) == kWastegate && valve_from_id("turbo_blow_off_valve", 20) == kBlowOff && valve_from_id("turbo", 5) == kNoValve);
+    assert(valve_from_id("turbo_wastegate", 15) == kWastegate && valve_from_id("turbo_blow_off_valve", 20) == kBlowOff && valve_from_id("turbo_blow_off_valve_large", 26) == kBlowOffLarge && valve_from_id("turbo", 5) == kNoValve);
     assert(valve_channel_index("open", 4) == kValveOpen && valve_channel_index("pressure", 8) == kValvePressure && valve_channel_index("x", 1) < 0);
     // Valves.
     assert(blow_off_vent(0.3, 5, 10, 1.0 / 60) == 0);                 // 2.9 kPa excess, under a 5 kPa spring
     assert(blow_off_vent(1.0, 5, 10, 1.0 / 60) > 0.9);                // 9.8 kPa excess vents
     assert(blow_off_vent(1.0, 5, 0.2, 1.0 / 60) <= 0.2);              // never more than the inlet holds
+    assert(blow_off_vent(1.0, 5, 50, 1.0 / 60, true) > blow_off_vent(1.0, 5, 50, 1.0 / 60) * 2);   // the large valve vents faster
     assert(wastegate_move(0, 3, 1, 5, 5, 1.0 / 60) == 0 && wastegate_move(1, 3, 1, 5, 5, 1.0 / 60) > 1.0 && wastegate_move(0.5, 3, 1, 5, 5, 1.0 / 60) < wastegate_move(1, 3, 1, 5, 5, 1.0 / 60));
     assert(wastegate_move(1, 1, 3, 5, 5, 1.0 / 60) < 0 && std::isfinite(wastegate_move(NAN, NAN, 1, 5, 5, 1.0 / 60)));
     // Model: no exhaust, no spool; the compressor still lets a naturally aspirated engine breathe.

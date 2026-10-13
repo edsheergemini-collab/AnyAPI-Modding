@@ -260,19 +260,22 @@ inline Step step(State& st, const Spec& s, const Inputs& in) {
 // Two companion parts, also of the impeller's class (two gas nodes: in at the bottom, out at the top, one cell):
 //   Blow-off valve: sits on the boost pipe. When boost in the pipe is higher than the turbo can hold (throttle
 //     off), and the excess passes its spring setting (Properties Tool, kPa), it vents the pipe to the air. That
-//     stops the compressor surging. Its outlet is open to the air (a pipe on it is optional).
+//     stops the compressor surging. It sits inline: turbo -> inlet, outlet ("Air") -> the air manifold; the gas
+//     passes straight through. Small (small pipe) and large (large pipe) versions.
 //   Wastegate: sits between the exhaust manifold and the downpipe or a vent. Its "open" input (0-1, from a data
 //     link or microcontroller) sets how much exhaust bypasses the turbine, which caps boost.
-enum Valve { kNoValve, kBlowOff, kWastegate };
+enum Valve { kNoValve, kBlowOff, kWastegate, kBlowOffLarge };
 constexpr const char* kBlowOffId = "turbo_blow_off_valve";
+constexpr const char* kBlowOffLargeId = "turbo_blow_off_valve_large";
 constexpr const char* kWastegateId = "turbo_wastegate";
-constexpr double kBlowOffCoeff = 60.0;          // L/s per unit of excess boost while open
+constexpr double kBlowOffCoeff = 60.0;          // L/s per unit of excess boost while open (small; large x2.5)
+constexpr double kBlowOffLargeFactor = 2.5;
 constexpr double kWastegateCoeff = 40.0;        // L/s per unit of pressure drop, fully open
 constexpr double kBlowOffDefaultKpa = 5.0;      // spring setting: excess boost (kPa) before it opens
 constexpr double kBlowOffMaxKpa = 50.0;
 inline Valve valve_from_id(const char* id, size_t length) {
     auto is = [&](const char* want) { return std::char_traits<char>::length(want) == length && std::char_traits<char>::compare(want, id, length) == 0; };
-    return !id ? kNoValve : is(kBlowOffId) ? kBlowOff : is(kWastegateId) ? kWastegate : kNoValve;
+    return !id ? kNoValve : is(kBlowOffId) ? kBlowOff : is(kBlowOffLargeId) ? kBlowOffLarge : is(kWastegateId) ? kWastegate : kNoValve;
 }
 
 enum ValveChannel { kValveOpen, kValveFlow, kValvePressure, kValveChannelCount };
@@ -291,9 +294,9 @@ struct ValveState {
 
 // Blow-off: litres to vent this tick from the boost pipe, given the boost above what the turbo holds (pressure
 // units), its spring setting and the litres in its inlet. 0 while the excess is under the spring.
-inline double blow_off_vent(double excess, double setting_kpa, double inlet_volume, double dt) {
+inline double blow_off_vent(double excess, double setting_kpa, double inlet_volume, double dt, bool large = false) {
     if (!(dt > 0) || !(excess * kKpaPerUnit > std::max(0.0, finite_or(setting_kpa, kBlowOffDefaultKpa)))) return 0;
-    return std::min(kBlowOffCoeff * excess * dt, std::max(0.0, inlet_volume));
+    return std::min(kBlowOffCoeff * (large ? kBlowOffLargeFactor : 1.0) * excess * dt, std::max(0.0, inlet_volume));
 }
 // Wastegate: litres to pass this tick, inlet -> outlet (negative: back), for an opening 0-1.
 inline double wastegate_move(double open, double p_in, double p_out, double v_in, double v_out, double dt) {
@@ -302,21 +305,56 @@ inline double wastegate_move(double open, double p_in, double p_out, double v_in
     return capped(kWastegateCoeff * o * (finite_or(p_in, 1.0) - finite_or(p_out, 1.0)) * dt, v_in, v_out);
 }
 
-inline std::string valve_entry(Valve v, const std::string& mesh) {
-    bool bov = v == kBlowOff;
-    std::string descriptors = bov
-        ? "{\"type\": \"type_f64_output\", \"name\": \"open\"}, {\"type\": \"type_f64_output\", \"name\": \"flow\"}, {\"type\": \"type_f64_output\", \"name\": \"pressure\"}"
-        : "{\"type\": \"type_f64_input\", \"name\": \"open\"}, {\"type\": \"type_f64_output\", \"name\": \"flow\"}, {\"type\": \"type_f64_output\", \"name\": \"pressure\"}";
-    std::string description = bov
-        ? "Blow-off valve for a Turbo. Put it on the boost pipe between the turbo and the air manifold (bottom port). When you lift off "
-          "the throttle it vents the trapped boost (top port, open to the air) so the turbo does not surge and keeps its spin. Set its "
-          "spring in the Properties Tool: the extra boost in kPa it waits for before opening. Outputs open (0/1), flow (L/s) and pressure (kPa)."
-        : "Electronic wastegate for a Turbo. Put it between the exhaust manifold (bottom port) and a vent or the turbo's exhaust out "
-          "(top port). Its open input (0 to 1, from a data link or microcontroller) lets exhaust bypass the turbine, which caps boost. "
-          "Outputs flow (L/s) and pressure (kPa).";
+inline std::string blow_off_entry(bool large, const std::string& mesh) {
+    std::string pipe = large ? ", \"size\": 1" : "";
+    std::string last = large ? "2" : "1", top = large ? "1" : "0";
+    // Data ports on both sides of every cell; the torque node (unused) underneath.
+    std::string surfaces = "{\"id\": \"torque\", \"dir\": 2, \"type\": \"torque\"}";
+    for (int z = 0; z <= (large ? 2 : 1); ++z)
+        for (int y = 0; y <= (large ? 1 : 0); ++y) {
+            surfaces += ", {\"pos\": [0, " + std::to_string(y) + ", " + std::to_string(z) + "], \"dir\": 0, \"gender\": 2, \"type\": \"port\"}";
+            surfaces += ", {\"pos\": [" + top + ", " + std::to_string(y) + ", " + std::to_string(z) + "], \"dir\": 1, \"gender\": 2, \"type\": \"port\"}";
+        }
+    std::string box = large ? "[1, 1, 2]" : "[0, 0, 1]";
+    std::string description = std::string("Inline blow-off valve for a Turbo, ") + (large ? "large pipe (4x4 and 5x5 turbos)" : "small pipe (2x2 and 3x3 turbos)") +
+        ". Pipe the turbo's compressor outlet into its steel end and its blue Air end into the air manifold; the arrows show the "
+        "flow. When you lift off the throttle it vents the trapped boost through the red cap so the turbo does not surge and keeps "
+        "its spin. Properties Tool: Stiffness (kPa of extra boost before it opens) and Sound effect (0 whoosh, 1 flutter, 2 chirp, "
+        "3 dump). Outputs open (0/1), flow (L/s) and pressure (kPa).";
     return std::string("    {\n") +
-        "      \"id\": \"" + (bov ? kBlowOffId : kWastegateId) + "\",\n" +
-        "      \"name\": \"" + (bov ? "Turbo Blow-Off Valve" : "Turbo Wastegate") + "\",\n" +
+        "      \"id\": \"" + (large ? kBlowOffLargeId : kBlowOffId) + "\",\n" +
+        "      \"name\": \"" + (large ? "Turbo Blow-Off Valve (Large)" : "Turbo Blow-Off Valve (Small)") + "\",\n" +
+        "      \"description\": \"" + description + "\",\n" +
+        "      \"class\": \"gas_pump_centrifugal\",\n" +
+        "      \"zones\": [{\"bounds_min\": [0, 0, 0], \"bounds_max\": " + box + "}],\n" +
+        "      \"interaction_zones\": [],\n" +
+        "      \"surfaces\": [" + surfaces + "],\n" +
+        "      \"logic_nodes\": [{\"pos\": [0, 0, 0], \"direction\": 4, \"type\": \"gas\"" + pipe + "}, {\"id\": \"air\", \"pos\": [0, 0, " + last + "], \"direction\": 5, \"type\": \"gas\"" + pipe + "}],\n" +
+        "      \"mesh_static\": {\"mesh_path\": \"" + mesh + "\"},\n" +
+        "      \"meshes_dynamic\": [],\n" +
+        "      \"category\": \"gas\",\n" +
+        "      \"tags_generated\": \"torque,port,\",\n" +
+        "      \"inspection_geometry\": [{\"p0\": [0.0, 0.0, 0.0], \"p1\": " + (large ? "[1.0, 1.0, 2.0]" : "[0.0, 0.0, 1.0]") + "}],\n" +
+        "      \"density\": 800.0,\n" +
+        "      \"mateable_port_types\": 2,\n" +
+        "      \"data_descriptors\": [{\"type\": \"type_f64_output\", \"name\": \"open\"}, {\"type\": \"type_f64_output\", \"name\": \"flow\"}, {\"type\": \"type_f64_output\", \"name\": \"pressure\"}],\n" +
+        "      \"tech_tier\": 3,\n" +
+        "      \"spawn_probability\": 0.1,\n" +
+        "      \"loot_group\": \"mechanical\",\n" +
+        "      \"constraint_orientations\": [[1, 0, 0, 0, 1, 0, 0, 0, 1]],\n" +
+        "      \"force_emitter_element_rotor\": {\"blades\": []}\n" +
+        "    }";
+}
+inline std::string blow_off_mesh_path(bool large) { return std::string("meshes/components/turbo_") + (large ? kBlowOffLargeId : kBlowOffId) + ".mesh"; }
+
+inline std::string wastegate_entry(const std::string& mesh) {
+    std::string descriptors = "{\"type\": \"type_f64_input\", \"name\": \"open\"}, {\"type\": \"type_f64_output\", \"name\": \"flow\"}, {\"type\": \"type_f64_output\", \"name\": \"pressure\"}";
+    std::string description = "Electronic wastegate for a Turbo. Put it between the exhaust manifold (bottom port) and a vent or the turbo's exhaust out "
+        "(top port). Its open input (0 to 1, from a data link or microcontroller) lets exhaust bypass the turbine, which caps boost. "
+        "Outputs flow (L/s) and pressure (kPa).";
+    return std::string("    {\n") +
+        "      \"id\": \"" + kWastegateId + "\",\n" +
+        "      \"name\": \"Turbo Wastegate\",\n" +
         "      \"description\": \"" + description + "\",\n" +
         "      \"class\": \"gas_pump_centrifugal\",\n" +
         "      \"zones\": [{}],\n" +
@@ -340,13 +378,16 @@ inline std::string valve_entry(Valve v, const std::string& mesh) {
 }
 constexpr const char* kValveMeshPath = "meshes/components/gas_port_a.mesh";
 
-// The definitions file: all four sizes, then the blow-off valve and the wastegate. built[n - kMinSize] says whether that size's mesh was written; a size
-// whose mesh could not be built falls back to the stock small impeller's look.
-inline std::string definitions_json(const bool built[kMaxSize - kMinSize + 1]) {
+// The definitions file: all four sizes, the two blow-off valves and the wastegate. built[n - kMinSize] says whether
+// that size's mesh was written (else the stock small impeller's look); bov_built[large] the same for the valves (else
+// the gas vent's look).
+inline std::string definitions_json(const bool built[kMaxSize - kMinSize + 1], const bool bov_built[2] = nullptr) {
     std::string out = "{\n  \"definitions\": [\n";
     for (int n = kMinSize; n <= kMaxSize; ++n)
         out += definition_entry(n, built[n - kMinSize] ? mesh_path(n) : std::string(kStockMeshPath)) + ",\n";
-    out += valve_entry(kBlowOff, kValveMeshPath) + ",\n" + valve_entry(kWastegate, kValveMeshPath) + "\n";
+    for (int large = 0; large < 2; ++large)
+        out += blow_off_entry(large, bov_built && bov_built[large] ? blow_off_mesh_path(large) : std::string(kValveMeshPath)) + ",\n";
+    out += wastegate_entry(kValveMeshPath) + "\n";
     return out + "  ]\n}\n";
 }
 

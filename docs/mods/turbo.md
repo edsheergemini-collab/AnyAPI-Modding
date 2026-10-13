@@ -43,18 +43,20 @@ engine loses power, as it does with any restricted exhaust. A turbo that is too 
 
 Two companion parts, in the gas parts with the turbos:
 
-- **Turbo Blow-Off Valve.** Put it on the boost pipe between the turbo and the engine's air intake (its bottom
-  port). When you lift off the throttle, boost trapped in the pipe is higher than the turbo can hold. The valve
-  vents it (top port, open to the air), so the turbo keeps its spin. Without one the compressor **surges**: the
-  boost pushes back through it and the turbo loses speed fast. Set its spring in the Properties Tool
-  (**Stiffness**, 0-50 kPa, default 5) and its sound (**Sound effect**, see Sounds below); both are saved with the vehicle: the extra boost it waits for before opening. A stiff spring lets some surge
-  through. Outputs `open` (0/1),
-  `flow` (L/s) and `pressure` (kPa).
+- **Turbo Blow-Off Valve (Small)** (1x1x2, small pipe, for the 2x2 and 3x3) and **(Large)** (2x2x3, large
+  pipe, for the 4x4 and 5x5). Inline: pipe the turbo's boost outlet into its **steel end** (it shows as *Gas
+  node*) and its **blue end** (*Air node*) into the engine's air intake; the white arrows on the pipe point the
+  way the air flows. Boost passes straight through. When you lift off the throttle, boost trapped in the pipe is
+  higher than the turbo can hold; the valve vents it through its red cap, so the turbo keeps its spin. Without
+  one the compressor **surges**: the boost pushes back through it and the turbo loses speed fast. Properties
+  Tool: **Stiffness** (0-50 kPa, default 5), the extra boost it waits for before opening (a stiff spring lets
+  some surge through), and **Sound effect** (see Sounds below); both are saved with the vehicle. The large valve
+  vents 2.5 times faster. Outputs `open` (0/1), `flow` (L/s) and `pressure` (kPa).
 - **Turbo Wastegate.** Put it between the exhaust manifold (bottom port) and a vent or the turbo's exhaust outlet
   pipe (top port). Its `open` input (0 to 1, from a data link or microcontroller) lets exhaust bypass the turbine,
   which caps boost. Outputs `flow` (L/s) and `pressure` (kPa).
 
-Both use the gas vent's look for now. The turbo's own `surge` output is 1 while it surges.
+The wastegate uses the gas port's look for now. The turbo's own `surge` output is 1 while it surges.
 
 ## Sounds
 
@@ -105,6 +107,10 @@ Wire them from a data port, a data link or a microcontroller. Pressures use the 
 - The meshes are built at start-up from the game's `rom/meshes/components/turbo_a.mesh` and written beside it as
   `turbo_turbocharger_N.mesh` ([`turbo_mesh.h`](../../native/turbo_mesh.h)). If the stock mesh is not in the
   expected format, that size uses the plain impeller look.
+- The blow-off valve meshes are built from simple shapes at start-up ([`turbo_valve_mesh.h`](../../native/turbo_valve_mesh.h))
+  and written beside them as `turbo_turbo_blow_off_valve(_large).mesh`. A valve joins its two gas nodes into one
+  pipe the way a stock pipe bracket does: the base `get_gas_flood_nodes` is hooked and answers for the valves with
+  the bracket's own function. If that is not found, the valve evens out its two sides every tick instead.
 - The impeller's server create, destroy, tick, tooltip and `get_data_f64` are hooked. When a turbo is created, the mod
   creates its hot side with the game's own functions: two gas contents and two gas nodes registered in the
   vehicle, so pipes and pressure treat them like any other port. Stock impellers are untouched.
