@@ -330,7 +330,7 @@ struct ValveState {
 // Blow-off: litres to vent this tick from the boost pipe, given the boost above what the turbo holds (pressure
 // units), its spring setting and the litres in its inlet. 0 while the excess is under the spring.
 inline double blow_off_vent(double excess, double setting_kpa, double inlet_volume, double dt, bool large = false) {
-    if (!(dt > 0) || !(excess * kKpaPerUnit > std::max(0.0, finite_or(setting_kpa, kBlowOffDefaultKpa)))) return 0;
+    if (!(dt > 0) || !(excess * kKpaPerUnit > std::max(0.5, finite_or(setting_kpa, kBlowOffDefaultKpa)))) return 0;   // 0.5 kPa: rounding, not boost
     return std::min(kBlowOffCoeff * (large ? kBlowOffLargeFactor : 1.0) * excess * dt, std::max(0.0, inlet_volume));
 }
 // Wastegate: litres to pass this tick, inlet -> outlet (negative: back), for an opening 0-1.

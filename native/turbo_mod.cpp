@@ -396,10 +396,11 @@ template <class F> void for_each_on_island(void* node, F f) {
     }
 }
 
-// Blow-off valves on the turbo's boost pipe vent the boost the turbo can no longer hold. Returns true if any vented.
+// Blow-off valves on the turbo's boost pipe vent the boost the turbo can no longer hold. Returns true if any vented
+// or is still open from venting (spring_kpa: the stiffest of them).
 bool vent_blow_off_valves(void* turbo, int size, double excess, double dt, double& spring_kpa) {
     if (!(excess > 0) || !(dt > 0)) return false;
-    bool vented = false;
+    bool vented = false, latched = false;
     double now = now_seconds();
     for_each_on_island(static_cast<uint8_t*>(turbo) + off::pump_node_b, [&](void* node) {
         void* component = at<void*>(node, off::node_component);
@@ -408,8 +409,11 @@ bool vent_blow_off_valves(void* turbo, int size, double excess, double dt, doubl
         // Inline valves join the boost pipe through both ports; the old layout only through its inlet.
         if (!g_bov_inline && node != static_cast<uint8_t*>(component) + off::pump_node_a) return;
         if (found->second.vented_by) return;          // once per tick (an inline valve shows up through both ports)
-        void* in = static_cast<uint8_t*>(component) + off::pump_content_0;
         double setting = found->second.setting ? *found->second.setting : kBlowOffDefaultKpa;
+        // Once open it stays open through the lift: between puffs the boost sits under the spring, and counting
+        // those ticks as surge made it chatter surge, vent, surge as the spool ran down.
+        if (now < found->second.open_until) { spring_kpa = latched ? std::max(spring_kpa, setting) : setting; latched = true; }
+        void* in = static_cast<uint8_t*>(component) + off::pump_content_0;
         double want = blow_off_vent(excess, setting, at<double>(in, off::content_volume), dt, found->second.kind == kKindBlowOffLarge);
         if (want <= 0) return;
         remove_volume(in, want);                      // out through the cap, to the air
@@ -417,10 +421,10 @@ bool vent_blow_off_valves(void* turbo, int size, double excess, double dt, doubl
         found->second.vented += want;
         found->second.vent_size = size;
         found->second.open_until = now + 0.3;
-        spring_kpa = vented ? std::max(spring_kpa, setting) : setting;
+        if (!latched) spring_kpa = vented ? std::max(spring_kpa, setting) : setting;
         vented = true;
     });
-    return vented;
+    return vented || latched;
 }
 
 // A wastegate with its antilag input on, on the turbo's exhaust inlet pipe; nullptr if none.
