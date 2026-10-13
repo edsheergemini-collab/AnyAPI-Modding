@@ -13,8 +13,8 @@
 // now: the definitions are added on this game's server and client scene, and every player would need the mod.
 // The hot-side gas is not saved; it refills from the pipes after loading.
 //
-// EXPERIMENTAL. Hooks game functions through the experimental SDK (turbo_bindings.h): Anymaker 0.1.24 /
-// Steam build 25826614 only. First runs are diagnostic: read anymaker_modding.log.
+// EXPERIMENTAL. Hooks game functions through the experimental SDK (turbo_bindings.h): Anymaker 0.1.25 /
+// Steam build 25904830 only. First runs are diagnostic: read anymaker_modding.log.
 #define NOMINMAX
 #include <windows.h>
 #include "anyapi_services_v1.h"
@@ -49,7 +49,7 @@ void log(int level, const char* fmt, ...) {
     host.log(uint32_t(level), kModId, buf);
 }
 
-// Reference layouts (metadata, Anymaker 0.1.24).
+// Reference layouts (metadata, Anymaker 0.1.24; unchanged in 0.1.25).
 namespace off {
 constexpr ptrdiff_t component_id = 64;               // server_scene.vehicle_component.m_id (s32)
 constexpr ptrdiff_t component_definition = 312;      // m_definition (ptr<const vehicle_component_definition>)

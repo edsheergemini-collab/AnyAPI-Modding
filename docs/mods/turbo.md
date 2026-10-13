@@ -1,8 +1,8 @@
 # Turbo
 
 > Turbo hooks game functions directly through the [experimental SDK](../../sdk/experimental/README.md),
-> so it only activates on Anymaker 0.1.24 / Steam build 25826614 and turns itself off on any other build.
-> Turbo 0.1.0 is a prototype: it needs AnyAPI 0.35.0 or newer on that build. **Single player only** for now.
+> so it only activates on Anymaker 0.1.25 / Steam build 25904830 and turns itself off on any other build.
+> Turbo 0.1.0 is a prototype: it needs AnyAPI 0.37.0 or newer on that build. **Single player only** for now.
 
 Turbo adds four exhaust-driven turbochargers: **Turbo 2x2**, **3x3**, **4x4** and **5x5**. Each is N cells wide,
 N tall and 2 thick. The front cell is the stock impeller's red compressor housing, scaled to the size; the back
