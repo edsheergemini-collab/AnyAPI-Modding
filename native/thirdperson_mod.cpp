@@ -148,8 +148,8 @@ double det(const double* m) { double c[3]; cross(basis(m, 1), basis(m, 2), c); r
 // camera keeps the horizon level, follows the view's heading and pitch through a smoothing filter that gets much
 // slower when the vehicle tilts or tumbles, and sits a little higher than the head.
 constexpr double kWorldUp[3] = {0, 1, 0};
-int g_up_axis = 1;              // basis vector that points up when the player stands level (learned on foot)
-double g_up_sign = 1;
+double g_up_world[3] = {0, 1, 0};   // the camera's "up" last frame, followed continuously through rolls
+int g_up_axis_logged = -1, g_up_logs;
 bool g_steady_active;           // smoothing state below is valid
 double g_cam_yaw, g_cam_pitch;
 LARGE_INTEGER g_steady_qpc;
@@ -164,20 +164,6 @@ double seated_factor(uint8_t* scene) {
     return std::isfinite(f) ? std::clamp(f, 0.0, 1.0) : 0;
 }
 
-// Learns which basis vector is "up" while the player stands (view not tilted by a vehicle).
-void learn_up_axis(const double* head, const double* back) {
-    if (std::fabs(back[1]) > 0.7) return;   // looking too far up or down
-    int best = -1; double best_d = 0;
-    for (int i = 0; i < 3; ++i) {
-        const double* v = basis(head, i);
-        if (std::fabs(dot(v, back)) > 0.5) continue;
-        if (std::fabs(v[1]) > std::fabs(best_d)) { best_d = v[1]; best = i; }
-    }
-    if (best < 0 || std::fabs(best_d) < 0.6) return;
-    if (best != g_up_axis || (best_d > 0 ? 1 : -1) != g_up_sign) log(0, "camera up axis: basis %d sign %+.0f", best, best_d > 0 ? 1.0 : -1.0);
-    g_up_axis = best; g_up_sign = best_d > 0 ? 1 : -1;
-}
-
 double angle_diff(double a, double b) { double d = std::fmod(a - b + 3 * kPi, 2 * kPi) - kPi; return d; }
 
 // head: the view at the head (third-person flags set, distance 0). back: unit vector from the head towards the
@@ -186,31 +172,44 @@ void steady_camera(double* ret, const double* head, const double* back, double d
     LARGE_INTEGER now, freq; QueryPerformanceCounter(&now); QueryPerformanceFrequency(&freq);
     double dt = g_steady_active ? std::clamp(double(now.QuadPart - g_steady_qpc.QuadPart) / double(freq.QuadPart), 0.0, 0.1) : 0;
     g_steady_qpc = now;
+    if (!g_steady_active) std::memcpy(g_up_world, kWorldUp, sizeof g_up_world);
+    // Which basis vector carries "back", and with which sign (the game's offset runs along one of them).
+    int bi = 0; double bd = 0;
+    for (int i = 0; i < 3; ++i) { double d = dot(basis(head, i), back); if (std::fabs(d) > std::fabs(bd)) { bd = d; bi = i; } }
+    if (std::fabs(bd) < 0.98) {
+        static bool logged; if (!logged) { logged = true; log(1, "steady camera skipped: back (%.2f, %.2f, %.2f) matches basis %d only by %.2f", back[0], back[1], back[2], bi, bd); }
+        return;
+    }
+    // The camera's up is whichever other basis vector (and sign) is closest to last frame's up, so it follows the
+    // vehicle continuously through rolls instead of guessing from a fixed axis.
+    int ui = -1; double us = 1, ubest = -2;
+    for (int i = 0; i < 3; ++i) {
+        if (i == bi) continue;
+        double d = dot(basis(head, i), g_up_world);
+        if (std::fabs(d) > ubest) { ubest = std::fabs(d); ui = i; us = d >= 0 ? 1 : -1; }
+    }
+    double up_now[3] = {basis(head, ui)[0] * us, basis(head, ui)[1] * us, basis(head, ui)[2] * us};
+    std::memcpy(g_up_world, up_now, sizeof g_up_world);
+    if (ui != g_up_axis_logged && g_up_logs < 8) {
+        ++g_up_logs; g_up_axis_logged = ui;
+        log(0, "steady camera: back = basis %d (%+.0f), up = basis %d (%+.0f); head basis v0 (%.2f %.2f %.2f) v1 (%.2f %.2f %.2f) v2 (%.2f %.2f %.2f)",
+            bi, bd > 0 ? 1.0 : -1.0, ui, us, head[0], head[1], head[2], head[3], head[4], head[5], head[6], head[7], head[8]);
+    }
+    double tumble = 1.0 - std::max(0.0, up_now[1]);   // 0 level, 1 on its side, 2 upside down
     double f[3] = {-back[0], -back[1], -back[2]};
     double yaw = std::atan2(f[0], f[2]), pitch = std::asin(std::clamp(f[1], -1.0, 1.0));
-    double up_now[3] = {basis(head, g_up_axis)[0] * g_up_sign, basis(head, g_up_axis)[1] * g_up_sign, basis(head, g_up_axis)[2] * g_up_sign};
-    double tumble = 1.0 - std::max(0.0, up_now[1]);   // 0 level, 1 on its side, 2 upside down
-    if (!g_steady_active) { g_cam_yaw = yaw; g_cam_pitch = std::clamp(pitch, -1.0, 1.0); g_steady_active = true; }
-    // Time constants 15% shorter than first tested (Nate: "a tad floaty").
     double ky = 1.0 - std::exp(-dt / (0.10 + 1.28 * tumble)), kp = 1.0 - std::exp(-dt / (0.21 + 1.28 * tumble));
     g_cam_yaw += angle_diff(yaw, g_cam_yaw) * ky;
     g_cam_pitch += (std::clamp(pitch, -1.2, 1.2) - g_cam_pitch) * kp;
     double nb[3] = {-std::cos(g_cam_pitch) * std::sin(g_cam_yaw), -std::sin(g_cam_pitch), -std::cos(g_cam_pitch) * std::cos(g_cam_yaw)};
     double nu[3] = {kWorldUp[0] - dot(kWorldUp, nb) * nb[0], kWorldUp[1] - dot(kWorldUp, nb) * nb[1], kWorldUp[2] - dot(kWorldUp, nb) * nb[2]};
     if (!normalize(nu)) return;
-    // Which basis vector carries "back", and with which sign (the game's offset runs along one of them).
-    int bi = 0; double bd = 0;
-    for (int i = 0; i < 3; ++i) { double d = dot(basis(head, i), back); if (std::fabs(d) > std::fabs(bd)) { bd = d; bi = i; } }
-    if (bi == g_up_axis || std::fabs(bd) < 0.98) {   // the offset must run along one basis vector
-        static bool logged; if (!logged) { logged = true; log(1, "steady camera skipped: back (%.2f, %.2f, %.2f) matches basis %d only by %.2f", back[0], back[1], back[2], bi, bd); }
-        return;
-    }
-    int ri = 3 - bi - g_up_axis;
+    int ri = 3 - bi - ui;
     double out[12];
     std::memcpy(out, head, sizeof out);
     double bs = bd > 0 ? 1 : -1;
-    for (int i = 0; i < 3; ++i) { out[bi * 3 + i] = nb[i] * bs; out[g_up_axis * 3 + i] = nu[i] * g_up_sign; }
-    double r[3]; cross(basis(out, g_up_axis), basis(out, bi), r);
+    for (int i = 0; i < 3; ++i) { out[bi * 3 + i] = nb[i] * bs; out[ui * 3 + i] = nu[i] * us; }
+    double r[3]; cross(basis(out, ui), basis(out, bi), r);
     for (int i = 0; i < 3; ++i) out[ri * 3 + i] = r[i];
     if ((det(out) > 0) != (det(head) > 0)) for (int i = 0; i < 3; ++i) out[ri * 3 + i] = -r[i];
     double raise = 0.35 * seated;
@@ -297,7 +296,6 @@ void hk_transform(double* ret, uint8_t* scene) {
     }
     write_third_person(scene, g_mode == Mode::Own ? 0.0 : g_sign * dist);
     if (!normalize(back)) return;
-    if (seated < 0.05) { learn_up_axis(head, back); g_steady_active = false; return; }
     if (seated < 0.5) { g_steady_active = false; return; }
     steady_camera(ret, head, back, dist, seated);
 }
