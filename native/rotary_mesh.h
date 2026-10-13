@@ -6,8 +6,8 @@
 //
 // The engine is laid out along z in cells from its front face (e = 0) to its back face (e = 2 x rotors). Rotor k
 // fills e = 2k..2k+2: an oval rotor housing between iron side plates, with two raised ribs, two spark plugs on the
-// left, an exhaust flange on each side and two intake runners up into a long plenum on top. A front cover with the
-// eccentric shaft pulley, a rear cover with the output flange and an oil pan run along the whole engine.
+// left, an exhaust flange on each side and two intake runners up into a long plenum on top. Front and rear covers carry the
+// small engine's octagonal output socket, and an oil pan runs along the whole engine.
 //   x: -0.12..0.12 m (3 cells), y: -0.12..0.36 m (6 cells), the output shaft at x = y = 0, like the small engine.
 // Mesh file layout (Anymaker 0.1.24, as GpsPart and Turbo read it):
 //   "mesh" u32 version(5) u32 (1) u32 name_length, name bytes
@@ -68,6 +68,15 @@ inline std::vector<P2> oval(double grow) {
 inline std::vector<P2> circle(double cx, double cy, double r, int n = 32) {
     std::vector<P2> out;
     for (int k = 0; k < n; ++k) { double t = 6.283185307179586 * k / n; out.push_back({cx + r * std::cos(t), cy + r * std::sin(t)}); }
+    return out;
+}
+// Octagon of corner radius r with a corner at `first_deg` and the rest mirrored about both axes (the stock engine's
+// torque socket uses an irregular one, corners at 18 and 72 degrees, for its rim).
+inline std::vector<P2> octagon(double r, double first_deg) {
+    const double d = first_deg * 3.141592653589793 / 180.0, h = 3.141592653589793;
+    const double t[8] = {d, h / 2 - d, h / 2 + d, h - d, h + d, 1.5 * h - d, 1.5 * h + d, 2 * h - d};
+    std::vector<P2> out;
+    for (double a : t) out.push_back({r * std::cos(a), r * std::sin(a)});
     return out;
 }
 // Rounded rectangle (superellipse) for the intake plenum.
@@ -165,14 +174,25 @@ inline void build_engine(Mesh& m, const Window& w, int rotors) {
     prism(m, w, cover, 0.0, 0.16, kIron);
     prism(m, w, cover, length - 0.16, length, kIron);
     for (int k = 1; k < rotors; ++k) prism(m, w, plate, 2.0 * k - 0.12, 2.0 * k + 0.12, kIron);
-    // Eccentric shaft pulley in front (into the front cell's 0.02 m lip, like the stock mating face) and the
-    // output flange behind.
-    prism(m, w, circle(0, 0, 0.05), -0.12, 0.0, kAlloy);
-    prism(m, w, circle(0, 0, 0.041), -0.19, -0.12, kIron, false, false);
-    prism(m, w, circle(0, 0, 0.05), -0.24, -0.19, kAlloy);
-    prism(m, w, circle(0, 0, 0.018), -0.25, -0.24, kIron, false, true);
-    prism(m, w, circle(0, 0, 0.055), length, length + 0.18, kIron);
-    prism(m, w, circle(0, 0, 0.03), length + 0.18, length + 0.25, kAlloy);
+    // The output faces, front and back: the small engine's octagonal torque socket, ring for ring (alloy rim, iron
+    // face, teal band, alloy collar, iron boss and the shaft stub into the 0.02 m lip), so gearboxes and engine wheels
+    // look as they do on the stock engines. The torque mating surfaces are the stock engine's (rotary_logic.h).
+    for (int end = 0; end < 2; ++end) {
+        const double face = end == 0 ? 0.0 : length, out = end == 0 ? -1.0 : 1.0;
+        struct Ring { std::vector<P2> o; double depth; Rgb c; };
+        const Ring rings[] = {
+            {octagon(0.1157, 18.07), 0.02, kAlloy},
+            {octagon(0.0947, 17.0), 0.04, kIron},
+            {octagon(0.0400, 22.5), 0.06, kPad},
+            {octagon(0.0346, 22.5), 0.08, kAlloy},
+            {octagon(0.0184, 22.5), 0.10, kIron},
+            {octagon(0.01265, 22.3), 0.25, kIron},
+        };
+        for (const Ring& r : rings) {
+            double a = face + out * r.depth;
+            prism(m, w, r.o, std::min(face, a), std::max(face, a), r.c, end == 0, end == 1);
+        }
+    }
     // Intake plenum on top, oil pan underneath.
     prism(m, w, rounded(0, 0.292, 0.088, 0.055), 0.22, length - 0.22, kAlloy);
     box(m, w, -0.072, 0.072, -0.12, -0.085, 0.3, length - 0.3, kIron);
