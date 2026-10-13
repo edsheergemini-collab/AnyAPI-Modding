@@ -249,15 +249,18 @@ void hk_tick(void* self, void* vehicle, void* scene) {
     at<double>(self, off::pump_flow) = o.compressor_move;
     double sound = t.state.spool;
     g_property_set(static_cast<uint8_t*>(self) + off::pump_factor_speed, &sound);
-    // Diagnostics for tuning: every 5 s per turbo while gas moves, up to 300 lines a session.
+    // Diagnostics for tuning: the first tick, then every 5 s per turbo while gas moves or any port is off ambient,
+    // up to 300 lines a session.
     static std::atomic<int> logs{300};
     double now = now_seconds();
-    ++t.ticks;
-    if ((t.state.exhaust_flow > 0.05 || t.state.spool > 0.01) && now - t.last_log >= 5.0 && logs.fetch_sub(1) > 0) {
+    bool off_ambient = false;
+    for (int i = 0; i < kNodeCount; ++i) off_ambient = off_ambient || std::abs(in.pressure[i] - 1.0) > 0.05;
+    if ((t.ticks++ == 0 || ((t.state.exhaust_flow > 0.05 || t.state.spool > 0.01 || off_ambient) && now - t.last_log >= 5.0)) && logs.fetch_sub(1) > 0) {
         t.last_log = now;
-        log(0, "Turbo %dx%d id %d: exhaust %.1f L/s at %.2f (%.0f kPa, %.0f C) -> out %.2f, spool %.2f, head %.2f, intake %.1f L/s %.2f -> %.2f (power x%.2f), dt %.4f",
-            t.size, t.size, at<int32_t>(self, off::component_id), t.state.exhaust_flow, in.pressure[kHotIn], in.pressure[kHotIn] * kKpaPerUnit, in.exhaust_temperature,
-            in.pressure[kHotOut], t.state.spool, o.head, t.state.intake_flow, in.pressure[kColdIn], in.pressure[kColdOut], power_multiplier(in.pressure[kColdOut]), in.dt);
+        log(0, "Turbo %dx%d id %d tick %d: hot in %.2f (%.2f L, %.0f C) -> hot out %.2f (%.2f L), exhaust %.1f L/s, spool %.2f, head %.2f, cold in %.2f (%.2f L) -> cold out %.2f (%.2f L), intake %.1f L/s (power x%.2f), dt %.4f",
+            t.size, t.size, at<int32_t>(self, off::component_id), t.ticks, in.pressure[kHotIn], in.volume[kHotIn], in.exhaust_temperature, in.pressure[kHotOut], in.volume[kHotOut],
+            t.state.exhaust_flow, t.state.spool, o.head, in.pressure[kColdIn], in.volume[kColdIn], in.pressure[kColdOut], in.volume[kColdOut], t.state.intake_flow,
+            power_multiplier(in.pressure[kColdOut]), in.dt);
     }
 }
 
