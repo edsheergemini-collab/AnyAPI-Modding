@@ -122,8 +122,8 @@ std::unordered_map<const void*, Turbo> g_turbos;     // keyed by server componen
 struct ValvePart {
     int kind = 0;
     ValveState state;
-    double* setting = nullptr;                        // blow-off spring, kPa: process heap, never freed (the Properties
-                                                      // Tool holds a pointer to it)
+    double* setting = nullptr;                        // blow-off spring (kPa) then sound (BlowOffSound): process heap,
+                                                      // never freed (the Properties Tool holds pointers to them)
     double vented = 0;                                // litres the turbos vented through it since its last tick
     double open_until = 0;                            // seconds (now_seconds) it shows open after venting
 };
@@ -250,8 +250,8 @@ void hk_create(void* self, void* vehicle) {
         ValvePart& v = g_valves[self];
         v.kind = kind;
         if (!v.setting) {
-            v.setting = static_cast<double*>(HeapAlloc(GetProcessHeap(), 0, sizeof(double)));
-            if (v.setting) *v.setting = kBlowOffDefaultKpa;
+            v.setting = static_cast<double*>(HeapAlloc(GetProcessHeap(), 0, 2 * sizeof(double)));
+            if (v.setting) { v.setting[0] = kBlowOffDefaultKpa; v.setting[1] = kWhoosh; }
         }
         static std::atomic<int> logs{8};
         if (logs.fetch_sub(1) > 0)
@@ -351,7 +351,8 @@ void tick_valve(void* self, int kind) {
     at<double>(self, off::pump_pressure) = 0;
     at<double>(self, off::pump_display_power) = 0;
     at<double>(self, off::pump_flow) = litres;
-    double sound = kind == kKindBlowOff ? encode_blow_off_factor(v.state.slots[kValveOpen] > 0.5, v.state.flow / 60.0) : 0.0;
+    int style = v.setting && std::isfinite(v.setting[1]) ? int(std::lround(v.setting[1])) : kWhoosh;
+    double sound = kind == kKindBlowOff ? encode_blow_off_factor(v.state.slots[kValveOpen] > 0.5, v.state.flow / 60.0, style) : 0.0;
     g_property_set(static_cast<uint8_t*>(self) + off::pump_factor_speed, &sound);
 }
 
@@ -457,7 +458,7 @@ units_t g_units_flow, g_units_frequency, g_units_pressure;
 to_pascals_t g_to_pascals;
 self_fn_t g_string_dtor;
 constexpr int kAddTooltipEntrySlot = 68;             // server_scene.peer.inspection_data.vehicle method table
-enum : int32_t { kLocSpeed = 197, kLocFlow = 207, kLocPressure = 215, kLocBoost = 234, kLocStiffness = 351 };   // e_localization_string
+enum : int32_t { kLocSpeed = 197, kLocFlow = 207, kLocPressure = 215, kLocBoost = 234, kLocStiffness = 351, kLocSoundEffect = 324 };   // e_localization_string
 enum : int32_t { kIconFlow = 16, kIconPressure = 30, kIconSpeed = 33 };         // inspection_util.e_tooltip_icon
 
 void add_entry(void* data, add_entry_t add, int32_t label, int32_t icon, units_t format, double value) {
@@ -525,8 +526,11 @@ void hk_properties(void* self, void* properties) {
     int32_t label = kLocStiffness;
     double min = 0, max = kBlowOffMaxKpa, step = 1;
     add(properties, &label, &setting, &min, &max, &step);
+    double* sound = setting + 1;                      // 0 whoosh, 1 flutter, 2 chirp, 3 dump (turbo_sound.h)
+    label = kLocSoundEffect; max = kBlowOffSoundCount - 1;
+    add(properties, &label, &sound, &min, &max, &step);
     static std::atomic<int> logs{4};
-    if (logs.fetch_sub(1) > 0) log(0, "blow-off valve spring row added (%.0f kPa)", *setting);
+    if (logs.fetch_sub(1) > 0) log(0, "blow-off valve spring and sound rows added (%.0f kPa, sound %.0f)", setting[0], setting[1]);
 }
 
 // ------------------------------------------------------------------------------------- part definitions
@@ -696,7 +700,7 @@ void stream_sound(void* self, int kind, const double* dt) {
     bool flag = false;
     if (kind == kKindBlowOff) {
         v.synth.voice = Voice::kBlowOff;
-        decode_blow_off_factor(factor, flag, level);
+        decode_blow_off_factor(factor, flag, level, v.synth.sound);
     } else {
         v.synth.voice = Voice::kTurbo;
         v.synth.size = kind;

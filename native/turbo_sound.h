@@ -1,5 +1,5 @@
 #pragma once
-// Turbo sounds, synthesized: spool whistle, compressor surge flutter and blow-off whoosh. No game or Windows
+// Turbo sounds, synthesized: spool whistle, compressor surge puffs and four blow-off valve sounds. No game or Windows
 // dependencies, so tests/turbo_logic_test.cpp renders them on any platform.
 //
 // The game plays voice chat by streaming 48 kHz mono 16-bit PCM into a positional voice effect (application.audio
@@ -27,14 +27,21 @@ inline void decode_turbo_factor(double factor, double& spool, bool& surging) {
     spool = surging ? (f - 0.51) / 0.49 : f * 2.0;
     spool = spool < 0 ? 0 : spool > 1 ? 1 : spool;
 }
-inline double encode_blow_off_factor(bool open, double intensity) {
+// Blow-off sounds the valve can make, picked in the Properties Tool ("Sound effect").
+enum BlowOffSound { kWhoosh = 0, kFlutter = 1, kChirp = 2, kDump = 3, kBlowOffSoundCount = 4 };
+// A blow-off valve sends 0 when shut; open, it sends its sound in steps of 0.2 (0.2, 0.4, 0.6, 0.8) plus up to
+// 0.19 for how hard it vents.
+inline double encode_blow_off_factor(bool open, double intensity, int sound = kWhoosh) {
     double i = std::isfinite(intensity) ? (intensity < 0 ? 0 : intensity > 1 ? 1 : intensity) : 0;
-    return open ? 0.5 + 0.5 * i : 0.0;
+    int k = sound < 0 || sound >= kBlowOffSoundCount ? 0 : sound;
+    return open ? 0.2 + 0.2 * k + 0.19 * i : 0.0;
 }
-inline void decode_blow_off_factor(double factor, bool& open, double& intensity) {
+inline void decode_blow_off_factor(double factor, bool& open, double& intensity, int& sound) {
     double f = std::isfinite(factor) ? (factor < 0 ? 0 : factor > 1 ? 1 : factor) : 0;
-    open = f > 0.25;
-    intensity = open ? (f - 0.5) * 2.0 : 0.0;
+    open = f > 0.1;
+    sound = open ? int((f - 0.195) / 0.2) : sound;
+    sound = sound < 0 ? 0 : sound >= kBlowOffSoundCount ? kBlowOffSoundCount - 1 : sound;
+    intensity = open ? (f - 0.2 - 0.2 * sound) / 0.19 : 0.0;
     intensity = intensity < 0 ? 0 : intensity > 1 ? 1 : intensity;
 }
 
@@ -68,17 +75,38 @@ struct Sweep {
 
 enum class Voice { kTurbo, kBlowOff };
 
+// Each turbo size has its own voice: the 2x2 screams high and puffs fast, the 5x5 whooshes deep and slow.
+struct Character {
+    double base, span;                 // whistle pitch at rest and the rise to full spool (Hz)
+    double overtone, overtone_gain;    // second whistle partial (ratio of the pitch)
+    double air_gain;                   // breathy whoosh that follows the whistle (big turbos move more air)
+    double hiss_hz, hiss_gain;         // intake hiss
+    double puff_pitch;                 // surge puff pitch (x the 3x3's)
+    double puff_fast, puff_slow;       // surge puffs a second, at the start and as boost runs out
+    double puff_decay, puff_gain;      // surge puff length (s) and loudness
+};
+inline Character character(int size) {
+    switch (size) {
+    case 2: return {2400, 7400, 2.0, 0.10, 0.05, 6500, 0.14, 1.30, 22, 11, 0.022, 1.00};
+    case 4: return {1050, 4400, 1.5, 0.12, 0.16, 4200, 0.18, 0.80, 15, 7.5, 0.036, 1.35};
+    case 5: return { 750, 3300, 1.5, 0.14, 0.24, 3400, 0.22, 0.62, 12, 6, 0.045, 1.50};
+    default: return {1500, 5600, 1.5, 0.08, 0.10, 5200, 0.16, 1.00, 18, 9, 0.028, 1.20};
+    }
+}
+
 struct Synth {
     Voice voice = Voice::kTurbo;
-    double size = 3;                   // turbo size 2-5: bigger turbos whistle lower
+    int size = 3;                      // turbo size 2-5 (see character())
+    int sound = kWhoosh;               // blow-off valve sound (BlowOffSound)
     // smoothed state
     double spool = 0, pitch = 0, phase1 = 0, phase2 = 0;
     double surge_env = 0, surge_age = 0, surge_clock = 1, pulse_age = 1, pulse_gain = 0, pulse_period = 0.07;
     double whoosh_env = 0;
+    double flutter_phase = 0, flutter_rate = 32, flutter_depth = 0.6, pop_age = 1;
     bool was_open = false;
     uint32_t rng = 0x12345678u;
-    BandPass hiss, click, whoosh, whoosh_low;
-    Sweep chirp, chirp_low;
+    BandPass hiss, click, whoosh, whoosh_low, rumble;
+    Sweep chirp, chirp_low, air, bov_chirp;
     bool init = false;
     double noise() {                   // white noise, -1..1
         rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
@@ -86,22 +114,23 @@ struct Synth {
     }
 };
 
-// Renders n samples. Turbo voice: spool 0-1 and surging; blow-off voice: open (true while venting) and boost 0-1
-// (how hard it vents, in spool's place).
-inline void render(Synth& s, double spool, bool flag, int16_t* out, int n) {
+// Renders n samples. Turbo voice: level = spool 0-1, flag = surging. Blow-off voice: flag = venting, level = how
+// hard (0-1), in the synth's sound.
+inline void render(Synth& s, double level, bool flag, int16_t* out, int n) {
+    const Character c = character(s.size);
     if (!s.init) {
-        s.hiss.set(5200.0, 0.9); s.click.set(6500.0, 0.7); s.whoosh.set(3600.0, 0.7); s.whoosh_low.set(1400.0, 0.8);
+        s.hiss.set(c.hiss_hz, 0.9); s.click.set(6500.0, 0.7); s.whoosh.set(3600.0, 0.7); s.whoosh_low.set(1400.0, 0.8);
+        s.rumble.set(500.0, 0.8);
         s.init = true;
     }
-    double target = std::isfinite(spool) ? (spool < 0 ? 0 : spool > 1 ? 1 : spool) : 0;
+    double target = std::isfinite(level) ? (level < 0 ? 0 : level > 1 ? 1 : level) : 0;
     const double dt = 1.0 / kSampleRate, two_pi = 6.283185307179586;
-    double base = 1500.0 - 180.0 * (s.size - 3), span = 5600.0 - 500.0 * (s.size - 3);
     for (int i = 0; i < n; ++i) {
         double v = 0;
         if (s.voice == Voice::kTurbo) {
             s.spool += (target - s.spool) * (1.0 - std::exp(-dt / 0.05));
-            // Spool whistle: a whine that rises with shaft speed, plus intake hiss.
-            double f = base + span * s.spool;
+            // Spool whistle: a whine that rises with shaft speed, the air rushing through, and intake hiss.
+            double f = c.base + c.span * s.spool;
             s.pitch = s.pitch <= 0 ? f : s.pitch + (f - s.pitch) * 0.002;
             // Surge ("stu-stu-stu"): boost slams back through the compressor in quick puffs. Each puff is a burst of
             // air: a sharp "t" then a breathy "u" that falls in pitch, like a short blow-off. The puffs come fast
@@ -115,34 +144,58 @@ inline void render(Synth& s, double spool, bool flag, int16_t* out, int n) {
                 s.pulse_age = 0;
                 double fade = std::exp(-s.surge_age / 0.9);
                 s.pulse_gain = s.surge_env * (0.35 + 0.65 * fade) * (0.85 + 0.3 * (0.5 + 0.5 * s.noise()));
-                double rate = 9.0 + 9.0 * fade;                                  // 18 a second, slowing to 9
+                double rate = c.puff_slow + (c.puff_fast - c.puff_slow) * fade;
                 s.pulse_period = (1.0 / rate) * (0.9 + 0.2 * (0.5 + 0.5 * s.noise()));
             }
             s.pulse_age += dt;
             double pa = s.pulse_age;
-            double body = pa < 0.004 ? pa / 0.004 : std::exp(-(pa - 0.004) / 0.028);   // "u": breath of air
-            double tick = std::exp(-pa / 0.0025);                                       // "t": the slam
-            double centre = 900.0 + 2600.0 * std::exp(-pa / 0.02);                      // falls 3.5 kHz -> 0.9 kHz
+            double body = pa < 0.004 ? pa / 0.004 : std::exp(-(pa - 0.004) / c.puff_decay);   // "u": breath of air
+            double tick = std::exp(-pa / 0.0025);                                             // "t": the slam
+            double centre = c.puff_pitch * (900.0 + 2600.0 * std::exp(-pa / (0.7 * c.puff_decay)));   // falls
             double nz = s.noise();
             double puff = 0.9 * s.chirp.run(nz, centre, 2.2) + 0.5 * s.chirp_low.run(nz, centre * 0.5, 1.4);
             double puffs = s.pulse_gain * (body * puff + 0.35 * tick * s.click.run(s.noise()));
             s.phase1 += two_pi * s.pitch * dt;
-            s.phase2 += two_pi * s.pitch * 1.5 * dt;
+            s.phase2 += two_pi * s.pitch * c.overtone * dt;
             if (s.phase1 > two_pi) s.phase1 -= two_pi;
             if (s.phase2 > two_pi) s.phase2 -= two_pi;
             double loud = std::pow(s.spool, 1.6) * (1.0 - 0.35 * s.surge_env) * (1.0 - 0.4 * s.pulse_gain * body);
-            v += loud * (0.30 * std::sin(s.phase1) + 0.08 * std::sin(s.phase2));
-            v += 0.16 * s.spool * s.spool * s.hiss.run(s.noise());
-            v += 1.2 * puffs;
+            v += loud * (0.30 * std::sin(s.phase1) + c.overtone_gain * std::sin(s.phase2));
+            v += loud * c.air_gain * 4.0 * s.air.run(s.noise(), std::min(s.pitch * 0.85, 16000.0), 5.0);
+            v += c.hiss_gain * s.spool * s.spool * s.hiss.run(s.noise());
+            v += c.puff_gain * puffs;
         } else {
-            // Blow-off whoosh: a burst of air ("pssh") when the valve opens, held while it vents, then a tail.
-            if (flag && !s.was_open) s.whoosh_env = 1.0;
+            // Blow-off: a burst of air when the valve opens, held while it vents, then a tail.
+            //   Whoosh:  the classic "pssshh".
+            //   Flutter: the same air chopped by the valve chattering on its seat (25-45 Hz, wandering): "brrrrsh".
+            //   Chirp:   a sharp falling "tsu" as it cracks open, then the air.
+            //   Dump:    a big, deep, longer "whoomph".
+            if (flag && !s.was_open) { s.whoosh_env = 1.0; s.pop_age = 0; }
             s.was_open = flag;
+            bool dump = s.sound == kDump;
             double hold = flag ? 0.55 + 0.45 * target : 0.0;
             if (s.whoosh_env < hold) s.whoosh_env += (hold - s.whoosh_env) * (1.0 - std::exp(-dt / 0.01));
-            else s.whoosh_env *= std::exp(-dt / (flag ? 0.6 : 0.28));
+            else s.whoosh_env *= std::exp(-dt / (flag ? (dump ? 0.9 : 0.6) : (dump ? 0.45 : 0.28)));
             double nz = s.noise();
-            v += s.whoosh_env * (0.55 * s.whoosh.run(nz) + 0.30 * s.whoosh_low.run(nz));
+            double air = dump ? 0.35 * s.whoosh.run(nz) + 0.55 * s.whoosh_low.run(nz) + 0.6 * s.rumble.run(nz)
+                              : 0.55 * s.whoosh.run(nz) + 0.30 * s.whoosh_low.run(nz);
+            double gain = 1.0;
+            if (s.sound == kFlutter) {
+                s.flutter_phase += s.flutter_rate * dt;
+                if (s.flutter_phase >= 1.0) {
+                    s.flutter_phase -= 1.0;
+                    s.flutter_rate = 30.0 + 12.0 * s.whoosh_env + 6.0 * s.noise();
+                    s.flutter_depth = 0.55 + 0.35 * (0.5 + 0.5 * s.noise());
+                }
+                gain = 1.25 * (1.0 - s.flutter_depth * (0.5 + 0.5 * std::cos(two_pi * s.flutter_phase)));
+            }
+            v += s.whoosh_env * gain * air;
+            s.pop_age += dt;
+            if (s.sound == kChirp && s.pop_age < 0.2) {
+                double centre = 1700.0 + 3300.0 * std::exp(-s.pop_age / 0.035);
+                double env = s.pop_age < 0.003 ? s.pop_age / 0.003 : std::exp(-(s.pop_age - 0.003) / 0.05);
+                v += 0.5 * env * s.bov_chirp.run(s.noise(), centre, 9.0);   // band-pass peak gain is its Q
+            }
         }
         v = std::isfinite(v) ? v : 0;
         out[i] = int16_t(std::lround(std::tanh(v) * 30000.0));   // soft clip: loud puffs round off, never crack
