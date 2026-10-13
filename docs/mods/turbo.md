@@ -50,8 +50,9 @@ Two companion parts, in the gas parts with the turbos:
   When you lift off the throttle, boost trapped in the pipe is higher than the turbo can hold; the valve vents it
   out of its trumpet, so the turbo keeps its spin. Without
   one the compressor **surges**: the boost pushes back through it and the turbo loses speed fast. Properties
-  Tool: **Stiffness** (0-50 kPa, default 5), the extra boost it waits for before opening (a stiff spring lets
-  some surge through), and **Sound effect** (see Sounds below); they reset to the defaults when the vehicle loads (the game's binary save format has no room for extra values). The large valve
+  Tool: **Stiffness** (0-50 kPa, default 5), the extra boost it holds before opening. Up to 15 kPa it stops
+  surge completely; stiffer springs let more and more surge through while they vent (at 50 the turbo surges
+  almost as if there were no valve, with the valve's hiss on top), and **Sound effect** (see Sounds below); they reset to the defaults when the vehicle loads (the game's binary save format has no room for extra values). The large valve
   vents 2.5 times faster. Outputs `open` (0/1), `flow` (L/s) and `pressure` (kPa).
 - **Turbo Wastegate (Small)** (1 cell, small pipe) and **(Large)** (2x2x2, large pipe, flows 2.5 times as much).
   Exhaust from the manifold goes in underneath; the side port goes to a vent or the turbo's exhaust outlet pipe. Its `open` input (0 to 1, from a data link or microcontroller) lets exhaust bypass the turbine,
@@ -72,7 +73,8 @@ Turbos and blow-off valves have their own sounds in place of the impeller hum, m
   its own voice: the 2x2 screams high, the 5x5 whooshes deep.
 - **Surge** (no blow-off valve, throttle lifted): "stu-stu-stu", quick puffs of air as boost pushes back through
   the compressor, slowing as the boost runs out. Bigger turbos puff deeper and slower.
-- **Blow-off**: pick the valve's sound in the Properties Tool (**Sound effect**): 0 whoosh, 1 flutter, 2 chirp,
+- **Blow-off**: a burst when it opens, then quiet as the trapped boost runs out, even if you stay off the
+  throttle. Pick the valve's sound in the Properties Tool (**Sound effect**): 0 whoosh, 1 flutter, 2 chirp,
   3 dump (deep). Each is voiced for the turbo venting through it: a 2x2's is short and sharp, a 5x5's long
   and deep.
 

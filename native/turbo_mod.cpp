@@ -142,6 +142,7 @@ struct ValvePart {
     double antilag_level = 0;                         // how hard (0-1), for the bangs
     int antilag_size = 3;                             // the turbo it fires for
     int vent_size = 3;                                // size of the turbo that last vented through it (its sound)
+    double last_tick = 0;                             // seconds (now_seconds) of its last own server tick
 };
 std::unordered_map<const void*, ValvePart> g_valves;
 std::unordered_map<const void*, int> g_definition_size;   // definition pointer -> 2-5, or 0 for other parts
@@ -396,7 +397,7 @@ template <class F> void for_each_on_island(void* node, F f) {
 }
 
 // Blow-off valves on the turbo's boost pipe vent the boost the turbo can no longer hold. Returns true if any vented.
-bool vent_blow_off_valves(void* turbo, int size, double excess, double dt) {
+bool vent_blow_off_valves(void* turbo, int size, double excess, double dt, double& spring_kpa) {
     if (!(excess > 0) || !(dt > 0)) return false;
     bool vented = false;
     double now = now_seconds();
@@ -416,6 +417,7 @@ bool vent_blow_off_valves(void* turbo, int size, double excess, double dt) {
         found->second.vented += want;
         found->second.vent_size = size;
         found->second.open_until = now + 0.3;
+        spring_kpa = vented ? std::max(spring_kpa, setting) : setting;
         vented = true;
     });
     return vented;
@@ -431,6 +433,8 @@ ValvePart* antilag_wastegate(Turbo& t) {
     });
     return found;
 }
+
+void publish_valve(void* self, ValvePart& v, double litres, double dt);
 
 void tick_valve(void* self, int kind) {
     ValvePart& v = g_valves[self];
@@ -461,6 +465,14 @@ void tick_valve(void* self, int kind) {
         else if (move < 0) { double back = -move; g_content_move(c1, c0, &back); }
         litres = std::abs(move);
     }
+    v.last_tick = now_seconds();
+    publish_valve(self, v, litres, dt);
+}
+
+// Flow, open and the sound byte the clients play, from the litres that went through this tick.
+void publish_valve(void* self, ValvePart& v, double litres, double dt) {
+    int kind = v.kind;
+    void* c0 = static_cast<uint8_t*>(self) + off::pump_content_0;
     v.state.flow += (litres / dt - v.state.flow) * std::min(1.0, dt / 0.15);
     if (is_blow_off(kind)) v.state.slots[kValveOpen] = blow_off_shows_open(now_seconds() < v.open_until, v.state.flow) ? 1.0 : 0.0;
     v.state.slots[kValveFlow] = v.state.flow;
@@ -472,6 +484,19 @@ void tick_valve(void* self, int kind) {
     double sound = is_blow_off(kind) ? encode_blow_off_factor(v.state.slots[kValveOpen] > 0.5, v.state.flow / 60.0, style, v.vent_size)
                                      : encode_blow_off_factor(now_seconds() < v.antilag_until, v.antilag_level, kWhoosh, v.antilag_size);   // antilag bangs
     g_property_set(static_cast<uint8_t*>(self) + off::pump_factor_speed, &sound);
+}
+
+// The game stops ticking a gas part whose pipes have settled: off throttle a blow-off valve went to sleep still
+// showing open and its sound played until the next throttle input woke it. The turbos keep ticking, so they
+// bring a sleeping valve's flow, open state and sound up to date (and hand it anything vented through it).
+void publish_sleeping_valves(double dt) {
+    double now = now_seconds();
+    for (auto& [self, v] : g_valves) {
+        if (now - v.last_tick < 0.1) continue;
+        double litres = 0;
+        if (is_blow_off(v.kind)) { litres = v.vented; v.vented = 0; v.vented_by = nullptr; }
+        publish_valve(const_cast<void*>(self), v, litres, dt);
+    }
 }
 
 void hk_tick(void* self, void* vehicle, void* scene) {
@@ -504,13 +529,14 @@ void hk_tick(void* self, void* vehicle, void* scene) {
     in.dt = g_delta_time && std::isfinite(*g_delta_time) ? *g_delta_time : 1.0 / 60.0;
     ValvePart* antilag = antilag_wastegate(t);
     in.antilag = antilag != nullptr;
-    in.bov_venting = vent_blow_off_valves(self, t.size, (in.pressure[kColdOut] - in.pressure[kColdIn]) - head_for(t.state, in.pressure[kColdIn]), in.dt);
+    in.bov_venting = vent_blow_off_valves(self, t.size, (in.pressure[kColdOut] - in.pressure[kColdIn]) - head_for(t.state, in.pressure[kColdIn]), in.dt, in.bov_spring_kpa);
     Step o = step(t.state, t.spec, in);
     if (antilag && t.state.antilag_firing) {          // the wastegate plays the bangs
         antilag->antilag_until = now_seconds() + 0.15;
         antilag->antilag_level = clamp01(1.0 - t.state.exhaust_flow / t.spec.rated_flow);
         antilag->antilag_size = t.size;
     }
+    publish_sleeping_valves(in.dt);
     if (t.hot) {
         if (o.turbine_move > 0) g_content_move(contents[kHotIn], contents[kHotOut], &o.turbine_move);
         else if (o.turbine_move < 0) { double v = -o.turbine_move; g_content_move(contents[kHotOut], contents[kHotIn], &v); }

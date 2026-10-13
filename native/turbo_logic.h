@@ -185,8 +185,10 @@ struct Inputs {
     double exhaust_temperature = kAmbientC;
     double dt = 0;
     bool bov_venting = false;        // a blow-off valve on the boost pipe is venting this tick
+    double bov_spring_kpa = 0;       // its Stiffness setting (the stiffest, if several vent)
     bool antilag = false;            // a wastegate on the exhaust has its antilag input on
 };
+inline double blow_off_surge_through(double spring_kpa);   // below, with the blow-off valve
 struct Step {
     double turbine_move = 0;     // litres to move this tick, hot in -> hot out (negative: back)
     double compressor_move = 0;  // litres to move this tick, cold in -> cold out (negative: back)
@@ -249,10 +251,14 @@ inline Step step(State& st, const Spec& s, const Inputs& in) {
     // Surge: boost pushing back through a spinning compressor (throttle off, no blow-off valve). The flow stalls and
     // reverses in pulses, which slows the wheel hard. A venting blow-off valve takes that boost instead.
     st.surging = false;
-    if (out.compressor_move < 0 && in.bov_venting) out.compressor_move = 0;
+    // A stiff spring holds that much boost against the wheel even while it vents, so some surge gets through: none
+    // up to kBlowOffSoftSpring, all of it at kBlowOffMaxSpring.
+    double through = in.bov_venting ? blow_off_surge_through(in.bov_spring_kpa) : 1.0;
+    if (out.compressor_move < 0 && through <= 0) out.compressor_move = 0;
     else if (out.compressor_move < 0 && st.spool > kSurgeSpool) {
         st.surging = true;
-        st.spool *= std::exp(-dt / kSurgeTau);
+        out.compressor_move *= through;
+        st.spool *= std::exp(-dt * through / kSurgeTau);
     }
     double intake_lps = std::abs(out.compressor_move) / dt;
     st.intake_flow += (intake_lps - st.intake_flow) * k;
@@ -294,6 +300,12 @@ constexpr double kBlowOffDefaultKpa = 5.0;      // spring setting: excess boost 
 // spring and the valve lets out a puff now and then for as long as the throttle stays shut. Those puffs still
 // stop the surge, but the valve only counts as open (sound and the `open` output) while it really dumps air.
 constexpr double kBlowOffAudibleLps = 8.0;
+// Stiffness: a soft spring (up to 15 kPa) stops surge completely; stiffer ones let more of it through.
+constexpr double kBlowOffSoftSpring = 15.0, kBlowOffMaxSpring = 50.0;
+inline double blow_off_surge_through(double spring_kpa) {
+    double k = (finite_or(spring_kpa, kBlowOffDefaultKpa) - kBlowOffSoftSpring) / (kBlowOffMaxSpring - kBlowOffSoftSpring);
+    return k < 0 ? 0 : k > 1 ? 1 : k;
+}
 inline bool blow_off_shows_open(bool vented_recently, double flow_lps) { return vented_recently && flow_lps > kBlowOffAudibleLps; }
 constexpr double kBlowOffMaxKpa = 50.0;
 inline Valve valve_from_id(const char* id, size_t length) {

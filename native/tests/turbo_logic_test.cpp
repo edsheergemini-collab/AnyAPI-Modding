@@ -150,19 +150,23 @@ int main() {
     // Lift-off with boost trapped in the pipe: without a blow-off valve the compressor surges and the wheel slows
     // hard; with one venting, the boost does not push back and the spool only coasts down.
     {
-        auto lift = [](bool bov) {
+        auto lift = [](bool bov, double spring = kBlowOffDefaultKpa) {
             State st; Plant pl; Spec s = spec(3);
             run(st, s, pl, s.rated_flow, s.rated_flow * 0.9, 20);
             double trapped = st.spool;
-            Inputs in; in.dt = 1.0 / 60; in.bov_venting = bov;
+            Inputs in; in.dt = 1.0 / 60; in.bov_venting = bov; in.bov_spring_kpa = spring;
             in.pressure[kHotIn] = 1; in.volume[kHotIn] = 2; in.pressure[kHotOut] = 1; in.volume[kHotOut] = 2;
             in.pressure[kColdIn] = 1; in.volume[kColdIn] = 2; in.pressure[kColdOut] = 10; in.volume[kColdOut] = 20;
             bool surged = false;
-            for (int i = 0; i < 30; ++i) { Step o = step(st, s, in); surged = surged || st.surging; if (bov) assert(o.compressor_move >= 0); }
+            for (int i = 0; i < 30; ++i) { Step o = step(st, s, in); surged = surged || st.surging; if (bov && spring <= kBlowOffSoftSpring) assert(o.compressor_move >= 0); }
             return std::make_pair(surged, st.spool / trapped);
         };
         auto without = lift(false), with = lift(true);
         assert(without.first && !with.first && without.second < with.second - 0.1 && st_ok(with.second));
+        // Stiffness: a stiff spring lets some surge through while it vents; the stiffest about as much as none.
+        auto stiff = lift(true, 35), stiffest = lift(true, 50);
+        assert(stiff.first && stiff.second < with.second && stiff.second > without.second && stiffest.second <= stiff.second);
+        assert(blow_off_surge_through(kBlowOffDefaultKpa) == 0 && blow_off_surge_through(15) == 0 && blow_off_surge_through(50) == 1);
     }
     // Exhaust flowing back out of the hot side (engine just stopped) does not spool the turbo.
     { State st; Inputs in; in.dt = 1.0 / 60;
