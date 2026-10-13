@@ -53,6 +53,19 @@ struct BandPass {
     }
 };
 
+// State-variable band-pass whose centre can move every sample (for the surge chirps).
+struct Sweep {
+    double ic1 = 0, ic2 = 0;
+    double run(double x, double centre_hz, double q) {
+        double g = std::tan(3.14159265358979 * centre_hz / kSampleRate), k = 1.0 / q;
+        double a1 = 1.0 / (1.0 + g * (g + k)), a2 = g * a1;
+        double v1 = a1 * ic1 + a2 * (x - ic2), v2 = ic2 + g * v1;
+        ic1 = 2 * v1 - ic1; ic2 = 2 * v2 - ic2;
+        if (!std::isfinite(v1)) { ic1 = ic2 = 0; return 0; }
+        return v1;
+    }
+};
+
 enum class Voice { kTurbo, kBlowOff };
 
 struct Synth {
@@ -60,11 +73,12 @@ struct Synth {
     double size = 3;                   // turbo size 2-5: bigger turbos whistle lower
     // smoothed state
     double spool = 0, pitch = 0, phase1 = 0, phase2 = 0;
-    double surge_env = 0, surge_clock = 0, pulse_env = 0;
+    double surge_env = 0, surge_age = 0, surge_clock = 1, pulse_age = 1, pulse_gain = 0, pulse_period = 0.07;
     double whoosh_env = 0;
     bool was_open = false;
     uint32_t rng = 0x12345678u;
-    BandPass hiss, chuff, whoosh, whoosh_low;
+    BandPass hiss, click, whoosh, whoosh_low;
+    Sweep chirp, chirp_low;
     bool init = false;
     double noise() {                   // white noise, -1..1
         rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
@@ -76,7 +90,7 @@ struct Synth {
 // (how hard it vents, in spool's place).
 inline void render(Synth& s, double spool, bool flag, int16_t* out, int n) {
     if (!s.init) {
-        s.hiss.set(5200.0, 0.9); s.chuff.set(850.0, 1.4); s.whoosh.set(3600.0, 0.7); s.whoosh_low.set(1400.0, 0.8);
+        s.hiss.set(5200.0, 0.9); s.click.set(6500.0, 0.7); s.whoosh.set(3600.0, 0.7); s.whoosh_low.set(1400.0, 0.8);
         s.init = true;
     }
     double target = std::isfinite(spool) ? (spool < 0 ? 0 : spool > 1 ? 1 : spool) : 0;
@@ -89,23 +103,37 @@ inline void render(Synth& s, double spool, bool flag, int16_t* out, int n) {
             // Spool whistle: a whine that rises with shaft speed, plus intake hiss.
             double f = base + span * s.spool;
             s.pitch = s.pitch <= 0 ? f : s.pitch + (f - s.pitch) * 0.002;
-            // Surge: 12-16 pulses a second ("stu-stu-stu"); each pulse is a chuff of air pushed back through the
-            // compressor, and it drags the whistle down for a moment.
-            s.surge_env += ((flag ? 1.0 : 0.0) - s.surge_env) * (1.0 - std::exp(-dt / (flag ? 0.02 : 0.12)));
-            double rate = 12.0 + 4.0 * s.spool;
-            s.surge_clock += rate * dt;
-            if (s.surge_clock >= 1.0) { s.surge_clock -= 1.0; s.pulse_env = 1.0; }
-            s.pulse_env *= std::exp(-dt / 0.03);
-            double wobble = 1.0 - 0.3 * s.surge_env * s.pulse_env;
-            s.phase1 += two_pi * s.pitch * wobble * dt;
-            s.phase2 += two_pi * s.pitch * 1.5 * wobble * dt;
+            // Surge ("stu-stu-stu"): boost slams back through the compressor in quick puffs. Each puff is a burst of
+            // air: a sharp "t" then a breathy "u" that falls in pitch, like a short blow-off. The puffs come fast
+            // and close together, then slow and fade as the boost runs out. The whistle keeps winding down
+            // underneath and ducks a little on each puff.
+            s.surge_env += ((flag ? 1.0 : 0.0) - s.surge_env) * (1.0 - std::exp(-dt / (flag ? 0.01 : 0.15)));
+            s.surge_age = flag ? s.surge_age + dt : 0.0;
+            s.surge_clock += dt;
+            if (s.surge_env > 0.05 && s.surge_clock >= s.pulse_period) {
+                s.surge_clock = 0;
+                s.pulse_age = 0;
+                double fade = std::exp(-s.surge_age / 0.9);
+                s.pulse_gain = s.surge_env * (0.35 + 0.65 * fade) * (0.85 + 0.3 * (0.5 + 0.5 * s.noise()));
+                double rate = 9.0 + 9.0 * fade;                                  // 18 a second, slowing to 9
+                s.pulse_period = (1.0 / rate) * (0.9 + 0.2 * (0.5 + 0.5 * s.noise()));
+            }
+            s.pulse_age += dt;
+            double pa = s.pulse_age;
+            double body = pa < 0.004 ? pa / 0.004 : std::exp(-(pa - 0.004) / 0.028);   // "u": breath of air
+            double tick = std::exp(-pa / 0.0025);                                       // "t": the slam
+            double centre = 900.0 + 2600.0 * std::exp(-pa / 0.02);                      // falls 3.5 kHz -> 0.9 kHz
+            double nz = s.noise();
+            double puff = 0.9 * s.chirp.run(nz, centre, 2.2) + 0.5 * s.chirp_low.run(nz, centre * 0.5, 1.4);
+            double puffs = s.pulse_gain * (body * puff + 0.35 * tick * s.click.run(s.noise()));
+            s.phase1 += two_pi * s.pitch * dt;
+            s.phase2 += two_pi * s.pitch * 1.5 * dt;
             if (s.phase1 > two_pi) s.phase1 -= two_pi;
             if (s.phase2 > two_pi) s.phase2 -= two_pi;
-            // While surging the whistle chops in time with the pulses.
-            double loud = std::pow(s.spool, 1.6) * (1.0 - 0.6 * s.surge_env * (1.0 - s.pulse_env));
+            double loud = std::pow(s.spool, 1.6) * (1.0 - 0.35 * s.surge_env) * (1.0 - 0.4 * s.pulse_gain * body);
             v += loud * (0.30 * std::sin(s.phase1) + 0.08 * std::sin(s.phase2));
             v += 0.16 * s.spool * s.spool * s.hiss.run(s.noise());
-            v += 1.5 * s.surge_env * s.pulse_env * (0.7 * s.chuff.run(s.noise()) + 0.25 * std::sin(two_pi * 170.0 * s.surge_clock / rate));
+            v += 1.2 * puffs;
         } else {
             // Blow-off whoosh: a burst of air ("pssh") when the valve opens, held while it vents, then a tail.
             if (flag && !s.was_open) s.whoosh_env = 1.0;
@@ -117,8 +145,7 @@ inline void render(Synth& s, double spool, bool flag, int16_t* out, int n) {
             v += s.whoosh_env * (0.55 * s.whoosh.run(nz) + 0.30 * s.whoosh_low.run(nz));
         }
         v = std::isfinite(v) ? v : 0;
-        double clipped = v > 1 ? 1 : v < -1 ? -1 : v;
-        out[i] = int16_t(std::lround(clipped * 30000.0));
+        out[i] = int16_t(std::lround(std::tanh(v) * 30000.0));   // soft clip: loud puffs round off, never crack
     }
 }
 
