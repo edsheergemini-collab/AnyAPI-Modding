@@ -44,8 +44,9 @@ installation is needed to build and test game-dependent features.
 
 | Package | Stable download | Requires |
 | --- | --- | --- |
-| AnyAPI | **0.37.0** | Anymaker 0.1.25 (0.36.0 for 0.1.24, 0.34.1 for 0.1.23) |
-| AnyHelpers, AnyInventory, AnyStorage | 0.27.0 | API 0.27.0 |
+| AnyAPI | **0.38.0** | Anymaker 0.1.25 (0.36.0 for 0.1.24, 0.34.1 for 0.1.23) |
+| AnyHelpers, AnyStorage | 0.27.0 | API 0.27.0 |
+| AnyInventory | 0.28.0 | API 0.27.0 (modded items need 0.38.0) |
 | AnyMap | 0.27.2 | API 0.27.0 |
 | AnyGraphics | 0.30.0 | API 0.36.0 |
 | AnyClock | 1.0.0 | API 0.30.0 |
