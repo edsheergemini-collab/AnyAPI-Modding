@@ -47,8 +47,8 @@ Two companion parts, in the gas parts with the turbos:
   port). When you lift off the throttle, boost trapped in the pipe is higher than the turbo can hold. The valve
   vents it (top port, open to the air), so the turbo keeps its spin. Without one the compressor **surges**: the
   boost pushes back through it and the turbo loses speed fast. Set its spring in the Properties Tool
-  (**Stiffness**, 0-50 kPa, default 5) and its sound (**Sound effect**, see Sounds below): the extra boost it waits for before opening. A stiff spring lets some surge
-  through. The setting is not saved yet; it goes back to 5 kPa when the vehicle loads. Outputs `open` (0/1),
+  (**Stiffness**, 0-50 kPa, default 5) and its sound (**Sound effect**, see Sounds below); both are saved with the vehicle: the extra boost it waits for before opening. A stiff spring lets some surge
+  through. Outputs `open` (0/1),
   `flow` (L/s) and `pressure` (kPa).
 - **Turbo Wastegate.** Put it between the exhaust manifold (bottom port) and a vent or the turbo's exhaust outlet
   pipe (top port). Its `open` input (0 to 1, from a data link or microcontroller) lets exhaust bypass the turbine,
@@ -66,7 +66,7 @@ Turbos and blow-off valves have their own sounds in place of the impeller hum, m
   the compressor, slowing as the boost runs out. Bigger turbos puff deeper and slower.
 - **Blow-off**: pick the valve's sound in the Properties Tool (**Sound effect**): 0 whoosh, 1 flutter, 2 chirp,
   3 dump (deep). Each is voiced for the turbo venting through it: a 2x2's is short and sharp, a 5x5's long
-  and deep. Like the spring, it is not saved yet.
+  and deep.
 
 The wastegate is silent. Sounds follow the vehicle volume slider and are heard by every player near the part.
 

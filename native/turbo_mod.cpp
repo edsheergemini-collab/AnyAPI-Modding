@@ -242,6 +242,15 @@ using tick_t = void (*)(void* self, void* vehicle, void* scene);
 using get_f64_t = void (*)(double** ret, void* self, const anymaker::gc_string_view* name);
 anymaker::cell_hook h_create, h_destroy, h_tick, h_get_f64;
 
+// The valve's settings (spring kPa, sound), allocated on first use; the save data may be read before create.
+double* valve_setting(ValvePart& v) {
+    if (!v.setting) {
+        v.setting = static_cast<double*>(HeapAlloc(GetProcessHeap(), 0, 2 * sizeof(double)));
+        if (v.setting) { v.setting[0] = kBlowOffDefaultKpa; v.setting[1] = kWhoosh; }
+    }
+    return v.setting;
+}
+
 void hk_create(void* self, void* vehicle) {
     reinterpret_cast<create_t>(h_create.original)(self, vehicle);
     if (!self || !vehicle) return;
@@ -250,10 +259,7 @@ void hk_create(void* self, void* vehicle) {
     if (kind == kKindBlowOff || kind == kKindWastegate) {
         ValvePart& v = g_valves[self];
         v.kind = kind;
-        if (!v.setting) {
-            v.setting = static_cast<double*>(HeapAlloc(GetProcessHeap(), 0, 2 * sizeof(double)));
-            if (v.setting) { v.setting[0] = kBlowOffDefaultKpa; v.setting[1] = kWhoosh; }
-        }
+        valve_setting(v);
         static std::atomic<int> logs{8};
         if (logs.fetch_sub(1) > 0)
             log(0, "%s created (component %d): contents %.2f/%.2f L", kind == kKindBlowOff ? "Blow-off valve" : "Wastegate", at<int32_t>(self, off::component_id),
@@ -507,8 +513,8 @@ void hk_tooltip(void* self, void* data) {
 }
 
 // ------------------------------------------------------------------------------------- Properties Tool
-// The blow-off valve adds its spring to the impeller's own rows (just the name): "Stiffness", 0-50 kPa of boost
-// over what the turbo holds before it opens. It resets to the default when the vehicle loads (not saved yet).
+// The blow-off valve adds its spring and sound to the impeller's own rows (just the name): "Stiffness", 0-50 kPa
+// of boost over what the turbo holds before it opens, and "Sound effect", 0-3. Both are saved with the vehicle.
 using get_properties_t = void (*)(void* self, void* properties);
 using add_f64_range_t = void (*)(void* properties, const int32_t* label, double* const* value, const double* min, const double* max, const double* step);
 constexpr int kAddPropertyF64RangeSlot = 10;          // server_scene.peer.property_data method table
@@ -533,6 +539,40 @@ void hk_properties(void* self, void* properties) {
     add(properties, &label, &sound, &min, &max, &step);
     static std::atomic<int> logs{4};
     if (logs.fetch_sub(1) > 0) log(0, "blow-off valve spring and sound rows added (%.0f kPa, sound %.0f)", setting[0], setting[1]);
+}
+
+// Saves: the game reads and writes a component's save data with the same parse calls, so the blow-off valve adds
+// two values after the impeller's own. Missing values (a valve saved before this) read as the defaults.
+using parse_save_t = void (*)(void* self, void* parser);
+using parse_f64_t = void (*)(void* parser, const anymaker::gc_string_view* name, double* value, const double* fallback);
+anymaker::cell_hook h_parse_save;
+parse_f64_t g_parse_f64;
+
+void hk_parse_save(void* self, void* parser) {
+    reinterpret_cast<parse_save_t>(h_parse_save.original)(self, parser);
+    if (!self || !parser || !g_parse_f64 || !g_string_dtor) return;
+    double* setting = nullptr;
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_mutex);
+        if (part_kind(self) != kKindBlowOff) return;
+        ValvePart& v = g_valves[self];
+        v.kind = kKindBlowOff;
+        setting = valve_setting(v);
+    }
+    if (!setting) return;
+    const char* names[2] = {"turbo_bov_spring_kpa", "turbo_bov_sound"};
+    const double fallback[2] = {kBlowOffDefaultKpa, double(kWhoosh)};
+    for (int i = 0; i < 2; ++i) {
+        anymaker::gc_string_view name{};
+        g_string_ctor(&name, names[i]);
+        g_parse_f64(parser, &name, &setting[i], &fallback[i]);
+        g_string_dtor(&name);
+        if (!std::isfinite(setting[i])) setting[i] = fallback[i];
+    }
+    setting[0] = std::max(0.0, std::min(kBlowOffMaxKpa, setting[0]));
+    setting[1] = std::max(0.0, std::min(double(kBlowOffSoundCount - 1), std::round(setting[1])));
+    static std::atomic<int> logs{6};
+    if (logs.fetch_sub(1) > 0) log(0, "blow-off valve save data: spring %.0f kPa, sound %.0f", setting[0], setting[1]);
 }
 
 // ------------------------------------------------------------------------------------- part definitions
@@ -859,6 +899,10 @@ void install_hooks() {
         void** properties = hook_cell(bind::centrifugal_get_properties);
         if (!properties || !h_properties.install(properties, (void*)&hk_properties))
             log(1, "blow-off valve spring setting unavailable (Properties Tool hook not found); it stays at %.0f kPa", kBlowOffDefaultKpa);
+        void** parse = hook_cell(bind::centrifugal_parse_save_data);
+        g_parse_f64 = reinterpret_cast<parse_f64_t>(function(bind::parser_parse_f64));
+        if (!parse || !g_parse_f64 || !g_string_dtor || !h_parse_save.install(parse, (void*)&hk_parse_save))
+            log(1, "blow-off valve settings won't be saved (save hook %d, parse %d)", !!parse, !!g_parse_f64);
         if (!tooltip_ok || !h_tooltip.install(tooltip, (void*)&hk_tooltip))
             log(1, "turbo tooltip unavailable (tooltip=%d base=%d units=%d/%d/%d pascals=%d string=%d); turbos show the stock impeller tooltip",
                 !!tooltip, !!g_component_tooltip, !!g_units_flow, !!g_units_frequency, !!g_units_pressure, !!g_to_pascals, !!g_string_dtor);
@@ -873,6 +917,7 @@ void remove_hooks() {
     h_client_tick.remove((void*)&hk_client_tick);
     h_add_definitions.remove((void*)&hk_add_definitions);
     h_properties.remove((void*)&hk_properties);
+    h_parse_save.remove((void*)&hk_parse_save);
     h_tooltip.remove((void*)&hk_tooltip);
     h_get_f64.remove((void*)&hk_get_f64);
     h_tick.remove((void*)&hk_tick);
