@@ -39,6 +39,23 @@ building at a quarter of that flow and reaches full boost at the rated flow. Big
 A turbo that is too small for its engine chokes it: exhaust backs up, and above 39 kPa of exhaust pressure the
 engine loses power, as it does with any restricted exhaust. A turbo that is too big barely spools.
 
+## Blow-off valve and wastegate
+
+Two companion parts, in the gas parts with the turbos:
+
+- **Turbo Blow-Off Valve.** Put it on the boost pipe between the turbo and the engine's air intake (its bottom
+  port). When you lift off the throttle, boost trapped in the pipe is higher than the turbo can hold. The valve
+  vents it (top port, open to the air), so the turbo keeps its spin. Without one the compressor **surges**: the
+  boost pushes back through it and the turbo loses speed fast. Set its spring in the Properties Tool
+  (**Stiffness**, 0-50 kPa, default 5): the extra boost it waits for before opening. A stiff spring lets some surge
+  through. The setting is not saved yet; it goes back to 5 kPa when the vehicle loads. Outputs `open` (0/1),
+  `flow` (L/s) and `pressure` (kPa).
+- **Turbo Wastegate.** Put it between the exhaust manifold (bottom port) and a vent or the turbo's exhaust outlet
+  pipe (top port). Its `open` input (0 to 1, from a data link or microcontroller) lets exhaust bypass the turbine,
+  which caps boost. Outputs `flow` (L/s) and `pressure` (kPa).
+
+Both use the gas vent's look for now. The turbo's own `surge` output is 1 while it surges.
+
 ## Tooltip
 
 Looking at a turbo shows its intake flow, turbine speed and boost (the pressure it adds over the intake), in the
@@ -57,6 +74,7 @@ Wire them from a data port, a data link or a microcontroller. Pressures use the 
 | `rpm` | Output | Shaft speed |
 | `exhaust_flow`, `intake_flow` | Output | Hot-side and cold-side flow, L/s |
 | `exhaust_temperature` | Output | Gas temperature at the hot inlet, °C |
+| `surge` | Output | 1 while the compressor surges (boost pushing back, no blow-off valve venting), else 0 |
 | `boost_limit` | Input | A wastegate: caps boost at this pressure in kPa (0 or unwired: no cap) |
 
 ## Getting it

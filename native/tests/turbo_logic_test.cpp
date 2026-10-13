@@ -4,9 +4,11 @@
 #include <cmath>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 using namespace turbo;
 static bool near(double a, double b, double e = 1e-6) { return std::abs(a - b) < e; }
+static bool st_ok(double v) { return std::isfinite(v) && v >= 0 && v <= 1; }
 
 // A fake 1 x 3 x 3 impeller mesh in the stock layout: one quad on the intake face, one on the outlet stub.
 static std::vector<uint8_t> fake_impeller() {
@@ -70,7 +72,7 @@ int main() {
     std::string json = definitions_json(built);
     size_t count = 0;
     for (size_t at = 0; (at = json.find("\"class\": \"gas_pump_centrifugal\"", at)) != std::string::npos; ++at) ++count;
-    assert(count == 4);
+    assert(count == 6);
     assert(json.find("turbo_turbocharger_2.mesh") != std::string::npos && json.find("turbo_turbocharger_4.mesh") == std::string::npos && json.find("turbo_a.mesh") != std::string::npos);
     assert(json.find("\"name\": \"Turbo 5x5\"") != std::string::npos && json.find("\"type_f64_input\", \"name\": \"boost_limit\"") != std::string::npos);
     int depth = 0, square = 0; bool in_string = false;
@@ -81,6 +83,15 @@ int main() {
         assert(depth >= 0 && square >= 0);
     }
     assert(depth == 0 && square == 0 && !in_string);
+    assert(json.find("\"id\": \"turbo_blow_off_valve\"") != std::string::npos && json.find("\"type_f64_input\", \"name\": \"open\"") != std::string::npos);
+    assert(valve_from_id("turbo_wastegate", 15) == kWastegate && valve_from_id("turbo_blow_off_valve", 20) == kBlowOff && valve_from_id("turbo", 5) == kNoValve);
+    assert(valve_channel_index("open", 4) == kValveOpen && valve_channel_index("pressure", 8) == kValvePressure && valve_channel_index("x", 1) < 0);
+    // Valves.
+    assert(blow_off_vent(0.3, 5, 10, 1.0 / 60) == 0);                 // 2.9 kPa excess, under a 5 kPa spring
+    assert(blow_off_vent(1.0, 5, 10, 1.0 / 60) > 0.9);                // 9.8 kPa excess vents
+    assert(blow_off_vent(1.0, 5, 0.2, 1.0 / 60) <= 0.2);              // never more than the inlet holds
+    assert(wastegate_move(0, 3, 1, 5, 5, 1.0 / 60) == 0 && wastegate_move(1, 3, 1, 5, 5, 1.0 / 60) > 1.0 && wastegate_move(0.5, 3, 1, 5, 5, 1.0 / 60) < wastegate_move(1, 3, 1, 5, 5, 1.0 / 60));
+    assert(wastegate_move(1, 1, 3, 5, 5, 1.0 / 60) < 0 && std::isfinite(wastegate_move(NAN, NAN, 1, 5, 5, 1.0 / 60)));
     // Model: no exhaust, no spool; the compressor still lets a naturally aspirated engine breathe.
     { State st; Plant pl; Spec s = spec(3); double p = run(st, s, pl, 0, 8, 10); assert(st.spool < 1e-9 && p > 0.6 && p < 1.0); }
     // Rated exhaust flow spools to full boost and back pressure stays under the 4 units that cut engine power.
@@ -96,6 +107,23 @@ int main() {
     { State st; st.slots[kBoostLimit] = 49; Plant pl; Spec s = spec(3); double p = run(st, s, pl, s.rated_flow, s.rated_flow * 0.5, 20); assert(p < 5.05 && p > 3.5); }
     // Spool falls when the exhaust stops.
     { State st; Plant pl; Spec s = spec(3); run(st, s, pl, s.rated_flow, 0, 10); double was = st.spool; run(st, s, pl, 0, 0, 3); assert(st.spool < was * 0.2); }
+    // Lift-off with boost trapped in the pipe: without a blow-off valve the compressor surges and the wheel slows
+    // hard; with one venting, the boost does not push back and the spool only coasts down.
+    {
+        auto lift = [](bool bov) {
+            State st; Plant pl; Spec s = spec(3);
+            run(st, s, pl, s.rated_flow, s.rated_flow * 0.9, 20);
+            double trapped = st.spool;
+            Inputs in; in.dt = 1.0 / 60; in.bov_venting = bov;
+            in.pressure[kHotIn] = 1; in.volume[kHotIn] = 2; in.pressure[kHotOut] = 1; in.volume[kHotOut] = 2;
+            in.pressure[kColdIn] = 1; in.volume[kColdIn] = 2; in.pressure[kColdOut] = 10; in.volume[kColdOut] = 20;
+            bool surged = false;
+            for (int i = 0; i < 30; ++i) { Step o = step(st, s, in); surged = surged || st.surging; if (bov) assert(o.compressor_move >= 0); }
+            return std::make_pair(surged, st.spool / trapped);
+        };
+        auto without = lift(false), with = lift(true);
+        assert(without.first && !with.first && without.second < with.second - 0.1 && st_ok(with.second));
+    }
     // Garbage input never produces NaN.
     { State st; Inputs in; for (auto& p : in.pressure) p = NAN; in.dt = NAN; Step o = step(st, spec(4), in); assert(o.turbine_move == 0 && o.compressor_move == 0);
       in.dt = 1.0 / 60; o = step(st, spec(4), in); assert(std::isfinite(o.turbine_move) && std::isfinite(o.compressor_move) && std::isfinite(st.spool)); }

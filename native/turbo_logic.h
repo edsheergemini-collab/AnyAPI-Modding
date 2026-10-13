@@ -27,6 +27,8 @@ constexpr double kKpaPerUnit = 9.8;       // the game's own scale (see above)
 constexpr double kMaxHead = 9.0;          // ambient 1 + 9 = 10: the engine's full 2x boost
 constexpr double kSpoolStart = 0.25;      // exhaust flow (fraction of rated) where the shaft starts to build boost
 constexpr double kAmbientC = 20.0;
+constexpr double kSurgeSpool = 0.15;      // below this spool a backflow is just boost bleeding off, not surge
+constexpr double kSurgeTau = 0.4;         // surge stalls the wheel: extra spool decay time constant, seconds
 
 // One turbo size: N x N face, 2 cells thick (cold side cell x = 0, hot side cell x = 1).
 struct Spec {
@@ -72,7 +74,7 @@ inline int size_from_id(const char* id, size_t length) {
 enum Node { kColdIn, kColdOut, kHotIn, kHotOut, kNodeCount };
 
 // Data channels.
-enum Channel { kIntakePressure, kExhaustPressure, kPowerMultiplier, kSpool, kRpm, kExhaustFlow, kIntakeFlow, kExhaustTemperature, kBoostLimit, kChannelCount };
+enum Channel { kIntakePressure, kExhaustPressure, kPowerMultiplier, kSpool, kRpm, kExhaustFlow, kIntakeFlow, kExhaustTemperature, kSurge, kBoostLimit, kChannelCount };
 constexpr int kFirstInput = kBoostLimit;
 struct ChannelInfo { const char* name; bool input; };
 inline constexpr ChannelInfo kChannels[kChannelCount] = {
@@ -84,6 +86,7 @@ inline constexpr ChannelInfo kChannels[kChannelCount] = {
     {"exhaust_flow", false},        // L/s through the hot side
     {"intake_flow", false},         // L/s through the cold side
     {"exhaust_temperature", false}, // C
+    {"surge", false},               // 1 while the compressor surges (boost flowing back, no blow-off valve), else 0
     {"boost_limit", true},          // input: cap intake pressure (kPa, game scale); 0 = no cap
 };
 inline int channel_index(const char* name, size_t length) {
@@ -169,21 +172,13 @@ inline std::string definition_entry(int n, const std::string& mesh_path) {
 }
 inline std::string mesh_path(int n) { return "meshes/components/turbo_" + definition_id(n) + ".mesh"; }
 constexpr const char* kStockMeshPath = "meshes/components/turbo_a.mesh";
-// The definitions file: all four sizes. built[n - kMinSize] says whether that size's mesh was written; a size
-// whose mesh could not be built falls back to the stock small impeller's look.
-inline std::string definitions_json(const bool built[kMaxSize - kMinSize + 1]) {
-    std::string out = "{\n  \"definitions\": [\n";
-    for (int n = kMinSize; n <= kMaxSize; ++n)
-        out += definition_entry(n, built[n - kMinSize] ? mesh_path(n) : std::string(kStockMeshPath)) + (n < kMaxSize ? ",\n" : "\n");
-    return out + "  ]\n}\n";
-}
-
 // ------------------------------------------------------------------------------------------- model
 struct Inputs {
     double pressure[kNodeCount]{};   // content volume / capacity of each node's content
     double volume[kNodeCount]{};     // litres currently in each node's content
     double exhaust_temperature = kAmbientC;
     double dt = 0;
+    bool bov_venting = false;        // a blow-off valve on the boost pipe is venting this tick
 };
 struct Step {
     double turbine_move = 0;     // litres to move this tick, hot in -> hot out (negative: back)
@@ -195,6 +190,7 @@ struct State {
     double spool = 0;
     double exhaust_flow = 0;     // smoothed L/s
     double intake_flow = 0;      // smoothed L/s
+    bool surging = false;
     double slots[kChannelCount]{};
 };
 
@@ -206,6 +202,14 @@ inline double capped(double want, double from_volume, double back_volume) {
 }
 inline double power_multiplier(double intake_pressure) {
     return 1.0 + (std::clamp(intake_pressure, 1.0, 10.0) - 1.0) / 9.0;
+}
+
+// The compressor's head for the current spool and boost limit (pressure units over its inlet).
+inline double head_for(const State& st, double inlet_pressure) {
+    double head = kMaxHead * st.spool;
+    double limit = finite_or(st.slots[kBoostLimit], 0.0);
+    if (limit > 0) head = std::min(head, std::max(0.0, limit / kKpaPerUnit - inlet_pressure));
+    return head;
 }
 
 inline Step step(State& st, const Spec& s, const Inputs& in) {
@@ -225,11 +229,17 @@ inline Step step(State& st, const Spec& s, const Inputs& in) {
     st.spool += (target - st.spool) * (1.0 - std::exp(-dt / tau));
     st.spool = clamp01(st.spool);
     // Cold side: a centrifugal compressor with the spool's head, like the stock impeller but far more flow.
-    out.head = kMaxHead * st.spool;
-    double limit = finite_or(st.slots[kBoostLimit], 0.0);
-    if (limit > 0) out.head = std::min(out.head, std::max(0.0, limit / kKpaPerUnit - p[kColdIn]));
+    out.head = head_for(st, p[kColdIn]);
     double net = out.head - (p[kColdOut] - p[kColdIn]);
     out.compressor_move = capped(s.compressor_coeff * net * dt, in.volume[kColdIn], in.volume[kColdOut]);
+    // Surge: boost pushing back through a spinning compressor (throttle off, no blow-off valve). The flow stalls and
+    // reverses in pulses, which slows the wheel hard. A venting blow-off valve takes that boost instead.
+    st.surging = false;
+    if (out.compressor_move < 0 && in.bov_venting) out.compressor_move = 0;
+    else if (out.compressor_move < 0 && st.spool > kSurgeSpool) {
+        st.surging = true;
+        st.spool *= std::exp(-dt / kSurgeTau);
+    }
     double intake_lps = std::abs(out.compressor_move) / dt;
     st.intake_flow += (intake_lps - st.intake_flow) * k;
     out.power = intake_lps * out.head;
@@ -242,7 +252,102 @@ inline Step step(State& st, const Spec& s, const Inputs& in) {
     st.slots[kExhaustFlow] = st.exhaust_flow;
     st.slots[kIntakeFlow] = st.intake_flow;
     st.slots[kExhaustTemperature] = finite_or(in.exhaust_temperature, kAmbientC);
+    st.slots[kSurge] = st.surging ? 1.0 : 0.0;
     return out;
+}
+
+// ------------------------------------------------------------------------------------------- valves
+// Two companion parts, also of the impeller's class (two gas nodes: in at the bottom, out at the top, one cell):
+//   Blow-off valve: sits on the boost pipe. When boost in the pipe is higher than the turbo can hold (throttle
+//     off), and the excess passes its spring setting (Properties Tool, kPa), it vents the pipe to the air. That
+//     stops the compressor surging. Its outlet is open to the air (a pipe on it is optional).
+//   Wastegate: sits between the exhaust manifold and the downpipe or a vent. Its "open" input (0-1, from a data
+//     link or microcontroller) sets how much exhaust bypasses the turbine, which caps boost.
+enum Valve { kNoValve, kBlowOff, kWastegate };
+constexpr const char* kBlowOffId = "turbo_blow_off_valve";
+constexpr const char* kWastegateId = "turbo_wastegate";
+constexpr double kBlowOffCoeff = 60.0;          // L/s per unit of excess boost while open
+constexpr double kWastegateCoeff = 40.0;        // L/s per unit of pressure drop, fully open
+constexpr double kBlowOffDefaultKpa = 5.0;      // spring setting: excess boost (kPa) before it opens
+constexpr double kBlowOffMaxKpa = 50.0;
+inline Valve valve_from_id(const char* id, size_t length) {
+    auto is = [&](const char* want) { return std::char_traits<char>::length(want) == length && std::char_traits<char>::compare(want, id, length) == 0; };
+    return !id ? kNoValve : is(kBlowOffId) ? kBlowOff : is(kWastegateId) ? kWastegate : kNoValve;
+}
+
+enum ValveChannel { kValveOpen, kValveFlow, kValvePressure, kValveChannelCount };
+inline constexpr const char* kValveChannelNames[kValveChannelCount] = {"open", "flow", "pressure"};
+inline int valve_channel_index(const char* name, size_t length) {
+    for (int i = 0; i < kValveChannelCount; ++i)
+        if (std::char_traits<char>::length(kValveChannelNames[i]) == length && std::char_traits<char>::compare(kValveChannelNames[i], name, length) == 0) return i;
+    return -1;
+}
+struct ValveState {
+    double setting_kpa = kBlowOffDefaultKpa;   // blow-off spring (Properties Tool)
+    double flow = 0;                          // smoothed L/s
+    double venting_until = 0;                 // blow-off: seconds of game time it stays open after a lift
+    double slots[kValveChannelCount]{};       // open (wastegate: input; blow-off: output 0/1), flow L/s, pressure kPa
+};
+
+// Blow-off: litres to vent this tick from the boost pipe, given the boost above what the turbo holds (pressure
+// units), its spring setting and the litres in its inlet. 0 while the excess is under the spring.
+inline double blow_off_vent(double excess, double setting_kpa, double inlet_volume, double dt) {
+    if (!(dt > 0) || !(excess * kKpaPerUnit > std::max(0.0, finite_or(setting_kpa, kBlowOffDefaultKpa)))) return 0;
+    return std::min(kBlowOffCoeff * excess * dt, std::max(0.0, inlet_volume));
+}
+// Wastegate: litres to pass this tick, inlet -> outlet (negative: back), for an opening 0-1.
+inline double wastegate_move(double open, double p_in, double p_out, double v_in, double v_out, double dt) {
+    double o = clamp01(finite_or(open, 0.0));
+    if (!(dt > 0) || o <= 0) return 0;
+    return capped(kWastegateCoeff * o * (finite_or(p_in, 1.0) - finite_or(p_out, 1.0)) * dt, v_in, v_out);
+}
+
+inline std::string valve_entry(Valve v, const std::string& mesh) {
+    bool bov = v == kBlowOff;
+    std::string descriptors = bov
+        ? "{\"type\": \"type_f64_output\", \"name\": \"open\"}, {\"type\": \"type_f64_output\", \"name\": \"flow\"}, {\"type\": \"type_f64_output\", \"name\": \"pressure\"}"
+        : "{\"type\": \"type_f64_input\", \"name\": \"open\"}, {\"type\": \"type_f64_output\", \"name\": \"flow\"}, {\"type\": \"type_f64_output\", \"name\": \"pressure\"}";
+    std::string description = bov
+        ? "Blow-off valve for a Turbo. Put it on the boost pipe between the turbo and the air manifold (bottom port). When you lift off "
+          "the throttle it vents the trapped boost (top port, open to the air) so the turbo does not surge and keeps its spin. Set its "
+          "spring in the Properties Tool: the extra boost in kPa it waits for before opening. Outputs open (0/1), flow (L/s) and pressure (kPa)."
+        : "Electronic wastegate for a Turbo. Put it between the exhaust manifold (bottom port) and a vent or the turbo's exhaust out "
+          "(top port). Its open input (0 to 1, from a data link or microcontroller) lets exhaust bypass the turbine, which caps boost. "
+          "Outputs flow (L/s) and pressure (kPa).";
+    return std::string("    {\n") +
+        "      \"id\": \"" + (bov ? kBlowOffId : kWastegateId) + "\",\n" +
+        "      \"name\": \"" + (bov ? "Turbo Blow-Off Valve" : "Turbo Wastegate") + "\",\n" +
+        "      \"description\": \"" + description + "\",\n" +
+        "      \"class\": \"gas_pump_centrifugal\",\n" +
+        "      \"zones\": [{}],\n" +
+        "      \"interaction_zones\": [],\n" +
+        "      \"surfaces\": [{\"id\": \"torque\", \"dir\": 0, \"type\": \"torque\"}, {\"dir\": 1, \"gender\": 2, \"type\": \"port\"}, {\"dir\": 4, \"gender\": 2, \"type\": \"port\"}, {\"dir\": 5, \"gender\": 2, \"type\": \"port\"}],\n" +
+        "      \"logic_nodes\": [{\"direction\": 2, \"type\": \"gas\"}, {\"direction\": 3, \"type\": \"gas\"}],\n" +
+        "      \"mesh_static\": {\"mesh_path\": \"" + mesh + "\"},\n" +
+        "      \"meshes_dynamic\": [],\n" +
+        "      \"category\": \"gas\",\n" +
+        "      \"tags_generated\": \"torque,port,\",\n" +
+        "      \"inspection_geometry\": [{\"p0\": [0.0, -0.5, -0.5], \"p1\": [0.0, 0.5, 0.5]}],\n" +
+        "      \"density\": 800.0,\n" +
+        "      \"mateable_port_types\": 2,\n" +
+        "      \"data_descriptors\": [" + descriptors + "],\n" +
+        "      \"tech_tier\": 3,\n" +
+        "      \"spawn_probability\": 0.1,\n" +
+        "      \"loot_group\": \"mechanical\",\n" +
+        "      \"constraint_orientations\": [[1, 0, 0, 0, 1, 0, 0, 0, 1]],\n" +
+        "      \"force_emitter_element_rotor\": {\"blades\": []}\n" +
+        "    }";
+}
+constexpr const char* kValveMeshPath = "meshes/components/gas_port_a.mesh";
+
+// The definitions file: all four sizes, then the blow-off valve and the wastegate. built[n - kMinSize] says whether that size's mesh was written; a size
+// whose mesh could not be built falls back to the stock small impeller's look.
+inline std::string definitions_json(const bool built[kMaxSize - kMinSize + 1]) {
+    std::string out = "{\n  \"definitions\": [\n";
+    for (int n = kMinSize; n <= kMaxSize; ++n)
+        out += definition_entry(n, built[n - kMinSize] ? mesh_path(n) : std::string(kStockMeshPath)) + ",\n";
+    out += valve_entry(kBlowOff, kValveMeshPath) + ",\n" + valve_entry(kWastegate, kValveMeshPath) + "\n";
+    return out + "  ]\n}\n";
 }
 
 }  // namespace turbo

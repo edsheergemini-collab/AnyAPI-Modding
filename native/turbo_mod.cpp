@@ -54,6 +54,8 @@ constexpr ptrdiff_t definition_id = 0;               // vehicle_component_defini
 constexpr ptrdiff_t pump_factor_speed = 480;         // gas_pump_centrifugal.m_factor_speed (replicated, drives the client's sound)
 constexpr ptrdiff_t pump_content_0 = 528;            // m_content_0: compressor inlet
 constexpr ptrdiff_t pump_content_1 = 584;            // m_content_1: compressor outlet
+constexpr ptrdiff_t pump_node_a = 640;               // m_gas_node_a (inlet node)
+constexpr ptrdiff_t pump_node_b = 704;               // m_gas_node_b (outlet node)
 constexpr ptrdiff_t pump_pressure = 872;             // m_pressure (head; shown in the stock tooltip)
 constexpr ptrdiff_t pump_display_power = 888;        // m_display_power
 constexpr ptrdiff_t pump_flow = 896;                 // m_flow (litres this tick)
@@ -62,6 +64,8 @@ constexpr ptrdiff_t content_amounts = 0;             // vehicle_gas_content.m_am
 constexpr ptrdiff_t content_volume = 32;             // vehicle_gas_content.m_volume (f64, litres)
 constexpr ptrdiff_t content_capacity = 40;           // m_capacity (f64, litres)
 constexpr ptrdiff_t content_temperature = 48;        // m_temperature (f64, C)
+constexpr ptrdiff_t node_component = 0;              // vehicle_gas_node.m_component
+constexpr ptrdiff_t node_island = 48;                // vehicle_gas_node.m_island (ptr<vehicle_gas_island>; its m_nodes vector at +0)
 constexpr ptrdiff_t node_node_index = 20;            // vehicle_gas_node.m_node_index (s32; -1 when not found)
 constexpr size_t content_size = 56, node_size = 64, definition_file_size = 40;
 constexpr int container_create_node_slot = 3, container_destroy_node_slot = 5;   // vehicle_gas_node.container method table
@@ -108,8 +112,18 @@ struct Turbo {
     double last_log = -1e9;
     int ticks = 0;
     double boost = 0;                                // cold outlet minus cold inlet, game pressure units (tooltip)
+    bool was_surging = false, was_venting = false;   // for logging the changes
 };
 std::unordered_map<const void*, Turbo> g_turbos;     // keyed by server component; nodes keep their address
+struct ValvePart {
+    int kind = 0;
+    ValveState state;
+    double* setting = nullptr;                        // blow-off spring, kPa: process heap, never freed (the Properties
+                                                      // Tool holds a pointer to it)
+    double vented = 0;                                // litres the turbos vented through it since its last tick
+    double open_until = 0;                            // seconds (now_seconds) it shows open after venting
+};
+std::unordered_map<const void*, ValvePart> g_valves;
 std::unordered_map<const void*, int> g_definition_size;   // definition pointer -> 2-5, or 0 for other parts
 std::recursive_mutex g_mutex;                        // tick, create, destroy and data lookups (recursive: game calls made
                                                      // under it may come back through our hooks)
@@ -120,7 +134,10 @@ double now_seconds() {
     return double(t.QuadPart) / double(freq.QuadPart);
 }
 
-int turbo_size(const void* component) {
+// What a gas_pump_centrifugal component is: 2-5 a turbo of that size, kKindBlowOff / kKindWastegate a valve,
+// 0 a stock impeller.
+constexpr int kKindBlowOff = 10, kKindWastegate = 11;
+int part_kind(const void* component) {
     if (!component || !anymaker::readable(static_cast<const uint8_t*>(component) + off::component_definition, 8)) return 0;
     const void* definition = at<const void*>(component, off::component_definition);
     if (!definition) return 0;
@@ -129,11 +146,17 @@ int turbo_size(const void* component) {
     int n = 0;
     if (anymaker::readable(static_cast<const uint8_t*>(definition) + off::definition_id, sizeof(anymaker::gc_string_view))) {
         auto& id = at<anymaker::gc_string_view>(definition, off::definition_id);
-        if (id.data && id.length > 0 && id.length < 64 && anymaker::readable(id.data, size_t(id.length))) n = size_from_id(id.data, size_t(id.length));
+        if (id.data && id.length > 0 && id.length < 64 && anymaker::readable(id.data, size_t(id.length))) {
+            n = size_from_id(id.data, size_t(id.length));
+            Valve v = valve_from_id(id.data, size_t(id.length));
+            if (v == kBlowOff) n = kKindBlowOff;
+            else if (v == kWastegate) n = kKindWastegate;
+        }
     }
     g_definition_size[definition] = n;
     return n;
 }
+int turbo_size(const void* component) { int k = part_kind(component); return k >= kMinSize && k <= kMaxSize ? k : 0; }
 
 void* container_of(void* vehicle) { return static_cast<uint8_t*>(vehicle) + off::vehicle_gas_nodes; }
 void* container_method(void* container, int slot) {
@@ -216,6 +239,20 @@ void hk_create(void* self, void* vehicle) {
     reinterpret_cast<create_t>(h_create.original)(self, vehicle);
     if (!self || !vehicle) return;
     std::lock_guard<std::recursive_mutex> lock(g_mutex);
+    int kind = part_kind(self);
+    if (kind == kKindBlowOff || kind == kKindWastegate) {
+        ValvePart& v = g_valves[self];
+        v.kind = kind;
+        if (!v.setting) {
+            v.setting = static_cast<double*>(HeapAlloc(GetProcessHeap(), 0, sizeof(double)));
+            if (v.setting) *v.setting = kBlowOffDefaultKpa;
+        }
+        static std::atomic<int> logs{8};
+        if (logs.fetch_sub(1) > 0)
+            log(0, "%s created (component %d): contents %.2f/%.2f L", kind == kKindBlowOff ? "Blow-off valve" : "Wastegate", at<int32_t>(self, off::component_id),
+                at<double>(self, off::pump_content_0 + off::content_capacity), at<double>(self, off::pump_content_1 + off::content_capacity));
+        return;
+    }
     int n = turbo_size(self);
     if (!n) return;
     Turbo& t = g_turbos[self];
@@ -234,13 +271,87 @@ void hk_destroy(void* self, void* vehicle, void* scene) {
         std::lock_guard<std::recursive_mutex> lock(g_mutex);
         auto found = g_turbos.find(self);
         if (found != g_turbos.end()) { destroy_hot_side(found->second.hot, vehicle); g_turbos.erase(found); }
+        g_valves.erase(self);
     }
     reinterpret_cast<destroy_t>(h_destroy.original)(self, vehicle, scene);
+}
+
+// ------------------------------------------------------------------------------------- valves
+// Calls f(node) for every gas node pooled with `node` (its island). The island's node vector is read defensively:
+// every entry must point back at the same island, else nothing is visited.
+template <class F> void for_each_on_island(void* node, F f) {
+    if (!node || !anymaker::readable(static_cast<uint8_t*>(node) + off::node_island, 8)) return;
+    void* island = at<void*>(node, off::node_island);
+    if (!island || !anymaker::readable(island, 24)) return;
+    auto* buffer = at<uint8_t*>(island, 0);
+    int32_t offset = at<int32_t>(island, 8), count = at<int32_t>(island, 12), size = at<int32_t>(island, 20);
+    if (!buffer || count <= 0 || count > 4096 || size != 8) return;
+    for (int32_t start : {offset, 0}) {
+        if (start < 0 || !anymaker::readable(buffer + size_t(start) * 8, size_t(count) * 8)) continue;
+        auto* entries = reinterpret_cast<void**>(buffer + size_t(start) * 8);
+        bool ok = true;
+        for (int32_t i = 0; i < count && ok; ++i)
+            ok = entries[i] && anymaker::readable(static_cast<uint8_t*>(entries[i]) + off::node_island, 8) && at<void*>(entries[i], off::node_island) == island;
+        if (!ok) continue;
+        for (int32_t i = 0; i < count; ++i) f(entries[i]);
+        return;
+    }
+}
+
+// Blow-off valves on the turbo's boost pipe vent the boost the turbo can no longer hold. Returns true if any vented.
+bool vent_blow_off_valves(void* turbo, double excess, double dt) {
+    if (!(excess > 0) || !(dt > 0)) return false;
+    bool vented = false;
+    double now = now_seconds();
+    for_each_on_island(static_cast<uint8_t*>(turbo) + off::pump_node_b, [&](void* node) {
+        void* component = at<void*>(node, off::node_component);
+        auto found = g_valves.find(component);
+        if (found == g_valves.end() || found->second.kind != kKindBlowOff) return;
+        if (node != static_cast<uint8_t*>(component) + off::pump_node_a) return;   // only its inlet (bottom) port
+        void* in = static_cast<uint8_t*>(component) + off::pump_content_0;
+        void* out = static_cast<uint8_t*>(component) + off::pump_content_1;
+        double setting = found->second.setting ? *found->second.setting : kBlowOffDefaultKpa;
+        double want = blow_off_vent(excess, setting, at<double>(in, off::content_volume), dt);
+        if (want <= 0) return;
+        g_content_move(in, out, &want);
+        found->second.vented += want;
+        found->second.open_until = now + 0.3;
+        vented = true;
+    });
+    return vented;
+}
+
+void tick_valve(void* self, int kind) {
+    ValvePart& v = g_valves[self];
+    v.kind = kind;
+    void* c0 = static_cast<uint8_t*>(self) + off::pump_content_0;
+    void* c1 = static_cast<uint8_t*>(self) + off::pump_content_1;
+    double dt = g_delta_time && std::isfinite(*g_delta_time) && *g_delta_time > 0 ? *g_delta_time : 1.0 / 60.0;
+    double litres = 0;
+    if (kind == kKindBlowOff) {
+        hold_ambient(c1);                             // the outlet is open to the air
+        litres = v.vented;
+        v.vented = 0;
+        v.state.slots[kValveOpen] = now_seconds() < v.open_until ? 1.0 : 0.0;
+    } else {
+        double move = wastegate_move(v.state.slots[kValveOpen], pressure_of(c0), pressure_of(c1), at<double>(c0, off::content_volume), at<double>(c1, off::content_volume), dt);
+        if (move > 0) g_content_move(c0, c1, &move);
+        else if (move < 0) { double back = -move; g_content_move(c1, c0, &back); }
+        litres = std::abs(move);
+    }
+    v.state.flow += (litres / dt - v.state.flow) * std::min(1.0, dt / 0.15);
+    v.state.slots[kValveFlow] = v.state.flow;
+    v.state.slots[kValvePressure] = pressure_of(c0) * kKpaPerUnit;
+    at<double>(self, off::pump_pressure) = 0;
+    at<double>(self, off::pump_display_power) = 0;
+    at<double>(self, off::pump_flow) = litres;
 }
 
 void hk_tick(void* self, void* vehicle, void* scene) {
     if (!self) return;
     std::unique_lock<std::recursive_mutex> lock(g_mutex);
+    int kind = part_kind(self);
+    if (kind == kKindBlowOff || kind == kKindWastegate) { tick_valve(self, kind); return; }
     if (!turbo_size(self)) { lock.unlock(); reinterpret_cast<tick_t>(h_tick.original)(self, vehicle, scene); return; }
     auto found = g_turbos.find(self);
     if (found == g_turbos.end()) {                  // placed before the hooks were in: no hot side, no boost
@@ -264,6 +375,7 @@ void hk_tick(void* self, void* vehicle, void* scene) {
     }
     if (contents[kHotIn]) in.exhaust_temperature = at<double>(contents[kHotIn], off::content_temperature);
     in.dt = g_delta_time && std::isfinite(*g_delta_time) ? *g_delta_time : 1.0 / 60.0;
+    in.bov_venting = vent_blow_off_valves(self, (in.pressure[kColdOut] - in.pressure[kColdIn]) - head_for(t.state, in.pressure[kColdIn]), in.dt);
     Step o = step(t.state, t.spec, in);
     if (t.hot) {
         if (o.turbine_move > 0) g_content_move(contents[kHotIn], contents[kHotOut], &o.turbine_move);
@@ -277,6 +389,13 @@ void hk_tick(void* self, void* vehicle, void* scene) {
     t.boost = std::max(0.0, in.pressure[kColdOut] - in.pressure[kColdIn]);
     double sound = t.state.spool;
     g_property_set(static_cast<uint8_t*>(self) + off::pump_factor_speed, &sound);
+    static std::atomic<int> event_logs{60};
+    if (t.state.surging != t.was_surging || in.bov_venting != t.was_venting) {
+        if ((t.state.surging || in.bov_venting) && event_logs.fetch_sub(1) > 0)
+            log(0, "Turbo %dx%d id %d: %s (spool %.2f, boost %.2f over a head of %.2f)", t.size, t.size, at<int32_t>(self, off::component_id),
+                t.state.surging ? "compressor surge (no blow-off valve venting)" : "blow-off valve venting", t.state.spool, in.pressure[kColdOut] - in.pressure[kColdIn], o.head);
+        t.was_surging = t.state.surging; t.was_venting = in.bov_venting;
+    }
     // Diagnostics for tuning: the first tick, then every 5 s per turbo while gas moves or any port is off ambient,
     // up to 300 lines a session.
     static std::atomic<int> logs{300};
@@ -285,17 +404,27 @@ void hk_tick(void* self, void* vehicle, void* scene) {
     for (int i = 0; i < kNodeCount; ++i) off_ambient = off_ambient || std::abs(in.pressure[i] - 1.0) > 0.05;
     if ((t.ticks++ == 0 || ((t.state.exhaust_flow > 0.05 || t.state.spool > 0.01 || off_ambient) && now - t.last_log >= 5.0)) && logs.fetch_sub(1) > 0) {
         t.last_log = now;
-        log(0, "Turbo %dx%d id %d tick %d: hot in %.2f (%.2f L, %.0f C) -> hot out %.2f (%.2f L), exhaust %.1f L/s, spool %.2f, head %.2f, cold in %.2f (%.2f L) -> cold out %.2f (%.2f L), intake %.1f L/s (power x%.2f), dt %.4f",
+        log(0, "Turbo %dx%d id %d tick %d: hot in %.2f (%.2f L, %.0f C) -> hot out %.2f (%.2f L), exhaust %.1f L/s, spool %.2f, head %.2f, cold in %.2f (%.2f L) -> cold out %.2f (%.2f L), intake %.1f L/s (power x%.2f)%s%s, dt %.4f",
             t.size, t.size, at<int32_t>(self, off::component_id), t.ticks, in.pressure[kHotIn], in.volume[kHotIn], in.exhaust_temperature, in.pressure[kHotOut], in.volume[kHotOut],
             t.state.exhaust_flow, t.state.spool, o.head, in.pressure[kColdIn], in.volume[kColdIn], in.pressure[kColdOut], in.volume[kColdOut], t.state.intake_flow,
-            power_multiplier(in.pressure[kColdOut]), in.dt);
+            power_multiplier(in.pressure[kColdOut]), t.state.surging ? ", SURGE" : "", in.bov_venting ? ", blow-off venting" : "", in.dt);
     }
 }
 
 void hk_get_f64(double** ret, void* self, const anymaker::gc_string_view* name) {
     reinterpret_cast<get_f64_t>(h_get_f64.original)(ret, self, name);
-    if (!ret || *ret || !self || !name) return;
+    if (!ret || !self || !name) return;
     auto view = name->view();
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_mutex);
+        auto valve = g_valves.find(self);
+        if (valve != g_valves.end()) {                // valves answer their own channels, even names the impeller knows
+            int c = valve_channel_index(view.data(), view.size());
+            if (c >= 0) *ret = &valve->second.state.slots[c];
+            return;
+        }
+    }
+    if (*ret) return;
     int i = channel_index(view.data(), view.size());
     if (i < 0) return;
     std::lock_guard<std::recursive_mutex> lock(g_mutex);
@@ -320,7 +449,7 @@ units_t g_units_flow, g_units_frequency, g_units_pressure;
 to_pascals_t g_to_pascals;
 self_fn_t g_string_dtor;
 constexpr int kAddTooltipEntrySlot = 68;             // server_scene.peer.inspection_data.vehicle method table
-enum : int32_t { kLocSpeed = 197, kLocFlow = 207, kLocBoost = 234 };            // e_localization_string
+enum : int32_t { kLocSpeed = 197, kLocFlow = 207, kLocPressure = 215, kLocBoost = 234, kLocStiffness = 351 };   // e_localization_string
 enum : int32_t { kIconFlow = 16, kIconPressure = 30, kIconSpeed = 33 };         // inspection_util.e_tooltip_icon
 
 void add_entry(void* data, add_entry_t add, int32_t label, int32_t icon, units_t format, double value) {
@@ -334,9 +463,15 @@ void add_entry(void* data, add_entry_t add, int32_t label, int32_t icon, units_t
 
 void hk_tooltip(void* self, void* data) {
     double flow = 0, rps = 0, boost = 0;
-    bool turbo = false;
+    bool turbo = false, valve = false;
     {
         std::lock_guard<std::recursive_mutex> lock(g_mutex);
+        auto v = g_valves.find(self);
+        if (v != g_valves.end()) {
+            valve = true;
+            flow = v->second.state.flow;
+            boost = v->second.state.slots[kValvePressure] / kKpaPerUnit;    // the pipe's pressure, game units
+        }
         auto found = g_turbos.find(self);
         if (found != g_turbos.end()) {
             turbo = true;
@@ -345,14 +480,45 @@ void hk_tooltip(void* self, void* data) {
             boost = found->second.boost;
         }
     }
-    auto add = turbo && data ? reinterpret_cast<add_entry_t>(container_method(data, kAddTooltipEntrySlot)) : nullptr;
+    auto add = (turbo || valve) && data ? reinterpret_cast<add_entry_t>(container_method(data, kAddTooltipEntrySlot)) : nullptr;
     if (!add) { reinterpret_cast<build_tooltip_t>(h_tooltip.original)(self, data); return; }
     g_component_tooltip(self, data);
     double pascals = 0;
     g_to_pascals(&pascals, &boost);
+    if (valve) {
+        add_entry(data, add, kLocFlow, kIconFlow, g_units_flow, flow);
+        add_entry(data, add, kLocPressure, kIconPressure, g_units_pressure, pascals);
+        return;
+    }
     add_entry(data, add, kLocFlow, kIconFlow, g_units_flow, flow);
     add_entry(data, add, kLocSpeed, kIconSpeed, g_units_frequency, rps);
     add_entry(data, add, kLocBoost, kIconPressure, g_units_pressure, pascals);
+}
+
+// ------------------------------------------------------------------------------------- Properties Tool
+// The blow-off valve adds its spring to the impeller's own rows (just the name): "Stiffness", 0-50 kPa of boost
+// over what the turbo holds before it opens. It resets to the default when the vehicle loads (not saved yet).
+using get_properties_t = void (*)(void* self, void* properties);
+using add_f64_range_t = void (*)(void* properties, const int32_t* label, double* const* value, const double* min, const double* max, const double* step);
+constexpr int kAddPropertyF64RangeSlot = 10;          // server_scene.peer.property_data method table
+anymaker::cell_hook h_properties;
+
+void hk_properties(void* self, void* properties) {
+    reinterpret_cast<get_properties_t>(h_properties.original)(self, properties);
+    double* setting = nullptr;
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_mutex);
+        auto v = g_valves.find(self);
+        if (v != g_valves.end() && v->second.kind == kKindBlowOff) setting = v->second.setting;
+    }
+    if (!setting || !properties) return;
+    auto add = reinterpret_cast<add_f64_range_t>(container_method(properties, kAddPropertyF64RangeSlot));
+    if (!add) return;
+    int32_t label = kLocStiffness;
+    double min = 0, max = kBlowOffMaxKpa, step = 1;
+    add(properties, &label, &setting, &min, &max, &step);
+    static std::atomic<int> logs{4};
+    if (logs.fetch_sub(1) > 0) log(0, "blow-off valve spring row added (%.0f kPa)", *setting);
 }
 
 // ------------------------------------------------------------------------------------- part definitions
@@ -528,6 +694,9 @@ void install_hooks() {
                   h_tick.install(tick, (void*)&hk_tick) && h_get_f64.install(get, (void*)&hk_get_f64) &&
                   h_add_definitions.install(add, (void*)&hk_add_definitions);
         if (!ok) { log(2, "a hook cell was already taken or not writable; Turbo is off"); return; }
+        void** properties = hook_cell(bind::centrifugal_get_properties);
+        if (!properties || !h_properties.install(properties, (void*)&hk_properties))
+            log(1, "blow-off valve spring setting unavailable (Properties Tool hook not found); it stays at %.0f kPa", kBlowOffDefaultKpa);
         if (!tooltip_ok || !h_tooltip.install(tooltip, (void*)&hk_tooltip))
             log(1, "turbo tooltip unavailable (tooltip=%d base=%d units=%d/%d/%d pascals=%d string=%d); turbos show the stock impeller tooltip",
                 !!tooltip, !!g_component_tooltip, !!g_units_flow, !!g_units_frequency, !!g_units_pressure, !!g_to_pascals, !!g_string_dtor);
@@ -539,6 +708,7 @@ void install_hooks() {
 }
 void remove_hooks() {
     h_add_definitions.remove((void*)&hk_add_definitions);
+    h_properties.remove((void*)&hk_properties);
     h_tooltip.remove((void*)&hk_tooltip);
     h_get_f64.remove((void*)&hk_get_f64);
     h_tick.remove((void*)&hk_tick);
