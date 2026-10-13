@@ -76,14 +76,15 @@ int main() {
     std::string json = definitions_json(built, bov_built, wg_built);
     size_t count = 0;
     for (size_t at = 0; (at = json.find("\"class\": \"gas_pump_centrifugal\"", at)) != std::string::npos; ++at) ++count;
-    assert(count == 10);                                   // four turbos, two of each valve, two intercoolers
+    assert(count == 8);                                    // four turbos, two of each valve
+    assert(json.find("\"class\": \"gas_tank\"") != std::string::npos);   // the intercooler: gas ports snap onto it
     assert(json.find("\"class\": \"gas_vent\"") != std::string::npos && json.find("\"class\": \"gas_vent_b\"") != std::string::npos);
     assert(json.find("\"id\": \"oil_in\"") != std::string::npos && json.find("\"type\": \"liquid\"") != std::string::npos);
     assert(json.find("radiator_a_0_0_0.mesh") != std::string::npos && json.find("\"mode_y\": \"tile\"") != std::string::npos);
     {   // with every mesh built the parts use theirs; the intercooler points at its first tile
-        bool all[4] = {true, true, true, true}, two[2] = {true, true};
-        std::string full = definitions_json(all, two, two, two, two);
-        assert(full.find("turbo_turbo_air_filter_large.mesh") != std::string::npos && full.find("turbo_turbo_intercooler_large_0_0_0.mesh") != std::string::npos &&
+        bool all[4] = {true, true, true, true}, two[2] = {true, true}, one = true;
+        std::string full = definitions_json(all, two, two, two, &one);
+        assert(full.find("turbo_turbo_air_filter_large.mesh") != std::string::npos && full.find("turbo_turbo_intercooler_0_0_0.mesh") != std::string::npos &&
                full.find("radiator_a_0_0_0.mesh") == std::string::npos);
         // the oil ports come after the four gas nodes, so saved gas links keep their meaning
         size_t entry = full.find("\"name\": \"Turbo 3x3\"");
@@ -109,7 +110,7 @@ int main() {
     assert(depth == 0 && square == 0 && !in_string);
     assert(json.find("\"id\": \"turbo_blow_off_valve\"") != std::string::npos && json.find("\"type_f64_input\", \"name\": \"open\"") != std::string::npos);
     assert(valve_from_id("turbo_wastegate", 15) == kWastegate && valve_from_id("turbo_blow_off_valve", 20) == kBlowOff && valve_from_id("turbo_blow_off_valve_large", 26) == kBlowOffLarge && valve_from_id("turbo", 5) == kNoValve &&
-           valve_from_id("turbo_wastegate_large", 21) == kWastegateLarge);
+           valve_from_id("turbo_wastegate_large", 21) == kWastegateLarge && valve_from_id("turbo_intercooler", 17) == kIntercooler && valve_from_id("turbo_air_filter_large", 22) == kAirFilterLarge);
     assert(wastegate_move(1, 3, 1, 50, 50, 1.0 / 60, true) > wastegate_move(1, 3, 1, 50, 50, 1.0 / 60) * 2);   // the large wastegate flows more
     assert(valve_channel_index("open", 4) == kValveOpen && valve_channel_index("pressure", 8) == kValvePressure && valve_channel_index("x", 1) < 0);
     // Valves.
@@ -325,7 +326,7 @@ int main() {
     // Air filter and intercooler meshes: readable, both paint markers, inside their cells.
     for (int large = 0; large < 2; ++large) {
         std::vector<std::vector<uint8_t>> meshes{build_air_filter_mesh(stock, large, "f")};
-        for (int tile = 0; tile < 3; ++tile) meshes.push_back(build_intercooler_tile(stock, large, tile, "i"));
+        for (int tile = 0; tile < 3 && !large; ++tile) meshes.push_back(build_intercooler_tile(stock, tile, "i"));
         for (size_t k = 0; k < meshes.size(); ++k) {
             MeshLayout m; assert(parse_mesh(meshes[k], m) && m.vertices > 50);
             std::vector<MeshVertex> v(m.vertices); std::memcpy(v.data(), meshes[k].data() + m.vertex_bytes + 4, v.size() * sizeof(MeshVertex));

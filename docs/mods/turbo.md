@@ -104,11 +104,11 @@ scales with the air's density against 30 °C air, so hot boost makes less power 
 air over 90 °C also knocks a boosted engine, which slowly damages it. Without an intercooler, full boost
 costs a damage step about every 6 to 7 minutes.
 
-The **Turbo Intercooler** (small pipe) and **Turbo Intercooler (Large)** fix that. Pipe the turbo's boost into the
-front port of the bottom tank and take the back port, the one with the blue ring, to the engine's air intake. It stretches like the
-radiator, wider along its width and taller one cell at a time. A bigger core cools better, and so does slower
-air: a 3x2 core takes about three quarters of the heat out of a 3x3 turbo's boost. Its two ports are one pipe, like
-the inline blow-off valve. It has no fan and makes no sound. The tanks paint.
+The **Turbo Intercooler** fixes that. Like the radiator, it has no pipes of its own: snap gas ports onto its faces,
+small or large, wherever suits the build. Run one from the turbo's boost and one to the engine's air intake. All its
+ports share one volume of air, so the boost passes straight through. It stretches like the radiator, wider along its
+width and taller one cell at a time. A bigger core cools better, and so does slower air: a 3x2 core takes about
+three quarters of the heat out of a 3x3 turbo's boost. The tanks paint.
 
 ## Sounds
 
@@ -188,9 +188,9 @@ Wire them from a data port, a data link or a microcontroller. Pressures use the 
   logic nodes, which sit after its four gas nodes so saved pipes keep their meaning. The upkeep model is in
   [`turbo_health.h`](../../native/turbo_health.h), the wear file in [`turbo_wear_store.h`](../../native/turbo_wear_store.h).
 - The air filter is a stock gas vent class with its own mesh; the turbo finds it on its intake pipe. The intercooler
-  is an impeller-class part with the radiator's stretch keys and three mesh tiles
-  ([`turbo_upkeep_mesh.h`](../../native/turbo_upkeep_mesh.h)); the turbo finds it on its boost pipe and sets the
-  temperature of the air it pushes.
+  is a stock gas tank class with the radiator's stretch keys, port surfaces and three mesh tiles
+  ([`turbo_upkeep_mesh.h`](../../native/turbo_upkeep_mesh.h)). The turbo finds it on its boost pipe through the
+  gas ports' shared content, and sets the temperature of the air it pushes.
 - Hot boost air: the server engine tick and `math.remap` are hooked. The engine tick notes its air manifolds'
   temperature; the one remap call it makes for its boost factor, `remap(pressure, 1, 10, 1, 2)`, is scaled for
   that temperature, and knock is added to the engine's own damage counter afterwards. If the hooks are not found,

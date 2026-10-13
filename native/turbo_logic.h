@@ -307,7 +307,7 @@ inline Step step(State& st, const Spec& s, const Inputs& in) {
 //     passes straight through. Small (small pipe) and large (large pipe) versions.
 //   Wastegate: sits between the exhaust manifold and the downpipe or a vent. Its "open" input (0-1, from a data
 //     link or microcontroller) sets how much exhaust bypasses the turbine, which caps boost. Small and large.
-enum Valve { kNoValve, kBlowOff, kWastegate, kBlowOffLarge, kWastegateLarge, kAirFilter, kAirFilterLarge, kIntercooler, kIntercoolerLarge };
+enum Valve { kNoValve, kBlowOff, kWastegate, kBlowOffLarge, kWastegateLarge, kAirFilter, kAirFilterLarge, kIntercooler };
 constexpr const char* kBlowOffId = "turbo_blow_off_valve";
 constexpr const char* kBlowOffLargeId = "turbo_blow_off_valve_large";
 constexpr const char* kWastegateId = "turbo_wastegate";
@@ -315,7 +315,6 @@ constexpr const char* kWastegateLargeId = "turbo_wastegate_large";
 constexpr const char* kAirFilterId = "turbo_air_filter";
 constexpr const char* kAirFilterLargeId = "turbo_air_filter_large";
 constexpr const char* kIntercoolerId = "turbo_intercooler";
-constexpr const char* kIntercoolerLargeId = "turbo_intercooler_large";
 constexpr double kBlowOffCoeff = 60.0;          // L/s per unit of excess boost while open (small; large x2.5)
 constexpr double kBlowOffLargeFactor = 2.5;
 constexpr double kWastegateCoeff = 40.0;        // L/s per unit of pressure drop, fully open (small; large x2.5)
@@ -335,7 +334,7 @@ constexpr double kBlowOffMaxKpa = 50.0;
 inline Valve valve_from_id(const char* id, size_t length) {
     auto is = [&](const char* want) { return std::char_traits<char>::length(want) == length && std::char_traits<char>::compare(want, id, length) == 0; };
     return !id ? kNoValve : is(kBlowOffId) ? kBlowOff : is(kBlowOffLargeId) ? kBlowOffLarge : is(kWastegateId) ? kWastegate : is(kWastegateLargeId) ? kWastegateLarge
-         : is(kAirFilterId) ? kAirFilter : is(kAirFilterLargeId) ? kAirFilterLarge : is(kIntercoolerId) ? kIntercooler : is(kIntercoolerLargeId) ? kIntercoolerLarge : kNoValve;
+         : is(kAirFilterId) ? kAirFilter : is(kAirFilterLargeId) ? kAirFilterLarge : is(kIntercoolerId) ? kIntercooler : kNoValve;
 }
 
 enum ValveChannel { kValveOpen, kValveFlow, kValvePressure, kValveAntilag, kValveChannelCount };
@@ -488,56 +487,59 @@ inline std::string air_filter_entry(bool large, const std::string& mesh) {
 }
 inline std::string air_filter_mesh_path(bool large) { return std::string("meshes/components/turbo_") + (large ? kAirFilterLargeId : kAirFilterId) + ".mesh"; }
 
-// Intercooler: stretches like the stock radiator (wider along x, taller in whole cells along y). Boost goes in the
-// front of the bottom tank and out the back, both in the middle; the core cools it. Its two ports are one pipe to
-// the game (as the blow-off valve's are); the turbo feeding it works out how much heat it takes out.
-inline std::string intercooler_mesh_path(bool large, int tile = 0) {
-    return std::string("meshes/components/turbo_") + (large ? kIntercoolerLargeId : kIntercoolerId) + "_0_" + std::to_string(tile) + "_0.mesh";
+// Intercooler: stretches like the stock radiator (wider along x, taller in whole cells along y) and, like it, has no
+// pipes of its own: gas ports snap onto any face, small or large. It is a stock gas tank underneath (class gas_tank),
+// so every port on it shares one volume of air and the boost passes through; the turbo feeding it works out how much
+// heat it takes out (turbo_health.h).
+inline std::string intercooler_mesh_path(int tile = 0) {
+    return std::string("meshes/components/turbo_") + kIntercoolerId + "_0_" + std::to_string(tile) + "_0.mesh";
 }
-inline std::string intercooler_entry(bool large, bool built) {
-    std::string pipe = large ? ", \"size\": 1" : "";
-    std::string description = std::string("Air-to-air intercooler for a Turbo, ") + (large ? "large pipe" : "small pipe") +
-        ". Pipe the turbo's boost into the front port of its bottom tank and the back port to the engine's air manifold. "
-        "Compressing air heats it, and hot air makes less power and can knock the engine; the intercooler cools the boost back "
-        "towards the outside air. Stretch it wider and taller (like a radiator) for more cooling. Paint the tanks. Outputs cooling "
-        "(0 to 1) and temperature (C, the boost air leaving it).";
-    std::string surfaces = "{\"id\": \"torque\", \"dir\": 3, \"type\": \"torque\"}, {\"pos\": [1, 0, 0], \"size\": [1, 1], \"dir\": 1, \"gender\": 2, \"type\": \"port\"}, "
-        "{\"pos\": [-1, 0, 0], \"size\": [1, 1], \"dir\": 0, \"gender\": 2, \"type\": \"port\"}, {\"pos\": [-1, 0, 0], \"size\": [3, 1], \"dir\": 2, \"gender\": 2, \"type\": \"port\"}";
+inline std::string intercooler_entry(bool built) {
+    std::string description = std::string("Air-to-air intercooler for a Turbo. Snap gas ports onto it (small or large) like a radiator: one for "
+        "the turbo's boost, one to the engine's air intake. Compressing air heats it, and hot air makes less power and can knock "
+        "the engine; the intercooler cools the boost back towards the outside air. Stretch it wider and taller for more cooling. "
+        "Paint the tanks.");
+    std::string surfaces = "{\"pos\": [-1, 0, 0], \"size\": [3, 2], \"dir\": 4, \"gender\": 2, \"type\": \"port\"}, "
+        "{\"pos\": [-1, 0, 0], \"size\": [3, 2], \"dir\": 5, \"gender\": 2, \"type\": \"port\"}, "
+        "{\"pos\": [-1, 1, 0], \"size\": [3, 1], \"dir\": 3, \"gender\": 2, \"type\": \"port\"}, "
+        "{\"pos\": [-1, 0, 0], \"size\": [3, 1], \"dir\": 2, \"gender\": 2, \"type\": \"port\"}, "
+        "{\"pos\": [1, 0, 0], \"size\": [1, 2], \"dir\": 1, \"gender\": 2, \"type\": \"port\"}, "
+        "{\"pos\": [-1, 0, 0], \"size\": [1, 2], \"gender\": 2, \"type\": \"port\"}";
     return std::string("    {\n") +
-        "      \"id\": \"" + (large ? kIntercoolerLargeId : kIntercoolerId) + "\",\n" +
-        "      \"name\": \"" + (large ? "Turbo Intercooler (Large)" : "Turbo Intercooler (Small)") + "\",\n" +
+        "      \"id\": \"" + kIntercoolerId + "\",\n" +
+        "      \"name\": \"Turbo Intercooler\",\n" +
         "      \"description\": \"" + description + "\",\n" +
-        "      \"class\": \"gas_pump_centrifugal\",\n" +
+        "      \"class\": \"gas_tank\",\n" +
         "      \"zones\": [{\"bounds_min\": [-1, 0, 0], \"bounds_max\": [1, 1, 0]}],\n" +
         "      \"interaction_zones\": [],\n" +
         "      \"surfaces\": [" + surfaces + "],\n" +
-        "      \"logic_nodes\": [{\"pos\": [0, 0, 0], \"direction\": 4, \"type\": \"gas\"" + pipe + "}, {\"pos\": [0, 0, 0], \"direction\": 5, \"type\": \"gas\"" + pipe + "}],\n" +
-        "      \"mesh_static\": {\"mesh_path\": \"" + (built ? intercooler_mesh_path(large) : std::string("meshes/components/radiator_a_0_0_0.mesh")) + "\"},\n" +
+        "      \"logic_nodes\": [],\n" +
+        "      \"mesh_static\": {\"mesh_path\": \"" + (built ? intercooler_mesh_path() : std::string("meshes/components/radiator_a_0_0_0.mesh")) + "\"},\n" +
         "      \"meshes_dynamic\": [],\n" +
         "      \"mode_x\": \"stretch\",\n" +
         "      \"mode_y\": \"tile\",\n" +
         "      \"interval\": [1, 1, 0],\n" +
         "      \"center_stretch\": [0.0, 0.5, 0.0],\n" +
         "      \"category\": \"gas\",\n" +
-        "      \"tags_generated\": \"torque,port,\",\n" +
+        "      \"tags_generated\": \"port,\",\n" +
         "      \"inspection_geometry\": [{\"p0\": [-1.0, 0.0, 0.0], \"p1\": [1.0, 1.0, 0.0], \"radius\": 0.37}],\n" +
         "      \"density\": 800.0,\n" +
-        "      \"mateable_port_types\": 2,\n" +
-        "      \"data_descriptors\": [{\"type\": \"type_f64_output\", \"name\": \"cooling\"}, {\"type\": \"type_f64_output\", \"name\": \"temperature\"}],\n" +
+        "      \"mateable_port_types\": 10,\n" +
+        "      \"data_descriptors\": [],\n" +
         "      \"tech_tier\": 3,\n" +
         "      \"spawn_probability\": 0.1,\n" +
         "      \"loot_group\": \"mechanical\",\n" +
-        "      \"constraint_orientations\": [[1, 0, 0, 0, 1, 0, 0, 0, 1]],\n" +
-        "      \"force_emitter_element_rotor\": {\"blades\": []}\n" +
+        "      \"constraint_orientations\": [[1, 0, 0, 0, 1, 0, 0, 0, 1]]\n" +
         "    }";
 }
 
 
-// The definitions file: all four sizes, the two blow-off valves and the two wastegates. built[n - kMinSize] says
-// whether that size's mesh was written (else the stock small impeller's look); bov_built[large] and wg_built[large]
-// the same for the valves (else the gas vent's look).
+// The definitions file: all four sizes, the two blow-off valves, the two wastegates, the two air filters and the
+// intercooler. built[n - kMinSize] says whether that size's mesh was written (else the stock small impeller's look);
+// bov_built[large], wg_built[large] and filter_built[large] the same for the valves and filters, cooler_built for the
+// intercooler's tiles (else the radiator's look).
 inline std::string definitions_json(const bool built[kMaxSize - kMinSize + 1], const bool bov_built[2] = nullptr, const bool wg_built[2] = nullptr,
-                                    const bool filter_built[2] = nullptr, const bool cooler_built[2] = nullptr) {
+                                    const bool filter_built[2] = nullptr, const bool* cooler_built = nullptr) {
     std::string out = "{\n  \"definitions\": [\n";
     for (int n = kMinSize; n <= kMaxSize; ++n)
         out += definition_entry(n, built[n - kMinSize] ? mesh_path(n) : std::string(kStockMeshPath)) + ",\n";
@@ -547,8 +549,7 @@ inline std::string definitions_json(const bool built[kMaxSize - kMinSize + 1], c
         out += wastegate_entry(large, wg_built && wg_built[large] ? wastegate_mesh_path(large) : std::string(kValveMeshPath)) + ",\n";
     for (int large = 0; large < 2; ++large)
         out += air_filter_entry(large, filter_built && filter_built[large] ? air_filter_mesh_path(large) : std::string(large ? "meshes/components/gas_port_b.mesh" : kValveMeshPath)) + ",\n";
-    for (int large = 0; large < 2; ++large)
-        out += intercooler_entry(large, cooler_built && cooler_built[large]) + (large ? "\n" : ",\n");
+    out += intercooler_entry(cooler_built && *cooler_built) + "\n";
     return out + "  ]\n}\n";
 }
 
