@@ -134,6 +134,9 @@ struct ValvePart {
     double vented = 0;                                // litres the turbos vented through it since its last tick
     double open_until = 0;                            // seconds (now_seconds) it shows open after venting
     const void* vented_by = nullptr;                  // the turbo that vented through it since its last tick
+    double antilag_until = 0;                         // wastegate: seconds (now_seconds) it shows antilag firing
+    double antilag_level = 0;                         // how hard (0-1), for the bangs
+    int antilag_size = 3;                             // the turbo it fires for
     int vent_size = 3;                                // size of the turbo that last vented through it (its sound)
 };
 std::unordered_map<const void*, ValvePart> g_valves;
@@ -382,6 +385,17 @@ bool vent_blow_off_valves(void* turbo, int size, double excess, double dt) {
     return vented;
 }
 
+// A wastegate with its antilag input on, on the turbo's exhaust inlet pipe; nullptr if none.
+ValvePart* antilag_wastegate(Turbo& t) {
+    if (!t.hot) return nullptr;
+    ValvePart* found = nullptr;
+    for_each_on_island(t.hot->node[0], [&](void* node) {
+        auto v = g_valves.find(at<void*>(node, off::node_component));
+        if (!found && v != g_valves.end() && v->second.kind == kKindWastegate && v->second.state.slots[kValveAntilag] > 0.5) found = &v->second;
+    });
+    return found;
+}
+
 void tick_valve(void* self, int kind) {
     ValvePart& v = g_valves[self];
     v.kind = kind;
@@ -418,7 +432,8 @@ void tick_valve(void* self, int kind) {
     at<double>(self, off::pump_display_power) = 0;
     at<double>(self, off::pump_flow) = litres;
     int style = v.setting && std::isfinite(v.setting[1]) ? int(std::lround(v.setting[1])) : kWhoosh;
-    double sound = is_blow_off(kind) ? encode_blow_off_factor(v.state.slots[kValveOpen] > 0.5, v.state.flow / 60.0, style, v.vent_size) : 0.0;
+    double sound = is_blow_off(kind) ? encode_blow_off_factor(v.state.slots[kValveOpen] > 0.5, v.state.flow / 60.0, style, v.vent_size)
+                                     : encode_blow_off_factor(now_seconds() < v.antilag_until, v.antilag_level, kWhoosh, v.antilag_size);   // antilag bangs
     g_property_set(static_cast<uint8_t*>(self) + off::pump_factor_speed, &sound);
 }
 
@@ -450,8 +465,15 @@ void hk_tick(void* self, void* vehicle, void* scene) {
     }
     if (contents[kHotIn]) in.exhaust_temperature = at<double>(contents[kHotIn], off::content_temperature);
     in.dt = g_delta_time && std::isfinite(*g_delta_time) ? *g_delta_time : 1.0 / 60.0;
+    ValvePart* antilag = antilag_wastegate(t);
+    in.antilag = antilag != nullptr;
     in.bov_venting = vent_blow_off_valves(self, t.size, (in.pressure[kColdOut] - in.pressure[kColdIn]) - head_for(t.state, in.pressure[kColdIn]), in.dt);
     Step o = step(t.state, t.spec, in);
+    if (antilag && t.state.antilag_firing) {          // the wastegate plays the bangs
+        antilag->antilag_until = now_seconds() + 0.15;
+        antilag->antilag_level = clamp01(1.0 - t.state.exhaust_flow / t.spec.rated_flow);
+        antilag->antilag_size = t.size;
+    }
     if (t.hot) {
         if (o.turbine_move > 0) g_content_move(contents[kHotIn], contents[kHotOut], &o.turbine_move);
         else if (o.turbine_move < 0) { double v = -o.turbine_move; g_content_move(contents[kHotOut], contents[kHotIn], &v); }
@@ -812,6 +834,10 @@ void stream_sound(void* self, int kind, const double* dt) {
     if (is_blow_off(kind)) {
         v.synth.voice = Voice::kBlowOff;
         decode_blow_off_factor(factor, flag, level, v.synth.sound, v.synth.size);
+    } else if (kind == kKindWastegate) {
+        v.synth.voice = Voice::kAntilag;
+        int unused = 0;
+        decode_blow_off_factor(factor, flag, level, unused, v.synth.size);
     } else {
         v.synth.voice = Voice::kTurbo;
         v.synth.size = kind;
@@ -868,7 +894,9 @@ void hk_client_tick(void* self, void* network, void* vehicle, void* scene, const
         kind = kind_of_definition(at<const void*>(self, off::client_definition));
     }
     if (!kind) { reinterpret_cast<client_tick_t>(h_client_tick.original)(self, network, vehicle, scene, dt); return; }
-    if (kind != kKindWastegate) stream_sound(self, kind, dt);   // the wastegate is silent, like the real one
+    // The wastegate only makes a sound (antilag bangs) once it has fired.
+    bool silent = kind == kKindWastegate && !g_voices.count(self) && !(at<double>(self, off::client_factor_speed) > 0);
+    if (!silent) stream_sound(self, kind, dt);
     double now = now_seconds();
     if (now - g_last_sweep > 1.0) {                 // parts gone from the scene stop ticking: free their voices
         g_last_sweep = now;

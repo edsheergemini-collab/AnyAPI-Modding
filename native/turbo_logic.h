@@ -27,6 +27,9 @@ constexpr double kKpaPerUnit = 9.8;       // the game's own scale (see above)
 constexpr double kMaxHead = 9.0;          // ambient 1 + 9 = 10: the engine's full 2x boost
 constexpr double kSpoolStart = 0.25;      // exhaust flow (fraction of rated) where the shaft starts to build boost
 constexpr double kAmbientC = 20.0;
+constexpr double kPsiPerKpa = 0.1450377;
+constexpr double kAntilagSpool = 0.8;     // antilag holds the shaft at this spool off throttle
+constexpr double kAntilagMinFlow = 0.03;  // exhaust flow (fraction of rated) that shows the engine is running
 constexpr double kSurgeSpool = 0.15;      // below this spool a backflow is just boost bleeding off, not surge
 constexpr double kSurgeTau = 0.4;         // surge stalls the wheel: extra spool decay time constant, seconds
 
@@ -74,7 +77,7 @@ inline int size_from_id(const char* id, size_t length) {
 enum Node { kColdIn, kColdOut, kHotIn, kHotOut, kNodeCount };
 
 // Data channels.
-enum Channel { kIntakePressure, kExhaustPressure, kPowerMultiplier, kSpool, kRpm, kExhaustFlow, kIntakeFlow, kExhaustTemperature, kSurge, kBoostLimit, kChannelCount };
+enum Channel { kIntakePressure, kExhaustPressure, kPowerMultiplier, kSpool, kRpm, kExhaustFlow, kIntakeFlow, kExhaustTemperature, kSurge, kBoost, kBoostPsi, kAntilagFiring, kBoostLimit, kChannelCount };
 constexpr int kFirstInput = kBoostLimit;
 struct ChannelInfo { const char* name; bool input; };
 inline constexpr ChannelInfo kChannels[kChannelCount] = {
@@ -87,6 +90,9 @@ inline constexpr ChannelInfo kChannels[kChannelCount] = {
     {"intake_flow", false},         // L/s through the cold side
     {"exhaust_temperature", false}, // C
     {"surge", false},               // 1 while the compressor surges (boost flowing back, no blow-off valve), else 0
+    {"boost", false},               // boost over the air outside, kPa (game scale; full boost is about 88)
+    {"boost_psi", false},           // the same in psi (full boost is about 12.8)
+    {"antilag", false},             // 1 while antilag (from a wastegate) is firing to hold the spool, else 0
     {"boost_limit", true},          // input: cap intake pressure (kPa, game scale); 0 = no cap
 };
 inline int channel_index(const char* name, size_t length) {
@@ -179,6 +185,7 @@ struct Inputs {
     double exhaust_temperature = kAmbientC;
     double dt = 0;
     bool bov_venting = false;        // a blow-off valve on the boost pipe is venting this tick
+    bool antilag = false;            // a wastegate on the exhaust has its antilag input on
 };
 struct Step {
     double turbine_move = 0;     // litres to move this tick, hot in -> hot out (negative: back)
@@ -191,6 +198,7 @@ struct State {
     double exhaust_flow = 0;     // smoothed L/s
     double intake_flow = 0;      // smoothed L/s
     bool surging = false;
+    bool antilag_firing = false;  // antilag is lighting fuel in the exhaust to hold the spool (throttle off)
     double slots[kChannelCount]{};
 };
 
@@ -225,6 +233,10 @@ inline Step step(State& st, const Spec& s, const Inputs& in) {
     st.exhaust_flow += (exhaust_lps - st.exhaust_flow) * k;
     // Shaft: the spool chases the exhaust flow, slowly (turbo lag), faster when it falls.
     double target = clamp01((st.exhaust_flow / s.rated_flow - kSpoolStart) / (1.0 - kSpoolStart));
+    // Antilag: when the exhaust alone would let the shaft slow, fuel burnt in the manifold keeps it spinning.
+    // It needs the engine running (some exhaust to light).
+    st.antilag_firing = in.antilag && target < kAntilagSpool && st.exhaust_flow > kAntilagMinFlow * s.rated_flow;
+    if (st.antilag_firing) target = kAntilagSpool;
     double tau = target > st.spool ? s.spool_up_s : s.spool_down_s;
     st.spool += (target - st.spool) * (1.0 - std::exp(-dt / tau));
     st.spool = clamp01(st.spool);
@@ -253,6 +265,9 @@ inline Step step(State& st, const Spec& s, const Inputs& in) {
     st.slots[kIntakeFlow] = st.intake_flow;
     st.slots[kExhaustTemperature] = finite_or(in.exhaust_temperature, kAmbientC);
     st.slots[kSurge] = st.surging ? 1.0 : 0.0;
+    st.slots[kBoost] = (p[kColdOut] - 1.0) * kKpaPerUnit;
+    st.slots[kBoostPsi] = st.slots[kBoost] * kPsiPerKpa;
+    st.slots[kAntilagFiring] = st.antilag_firing ? 1.0 : 0.0;
     return out;
 }
 
@@ -278,8 +293,8 @@ inline Valve valve_from_id(const char* id, size_t length) {
     return !id ? kNoValve : is(kBlowOffId) ? kBlowOff : is(kBlowOffLargeId) ? kBlowOffLarge : is(kWastegateId) ? kWastegate : kNoValve;
 }
 
-enum ValveChannel { kValveOpen, kValveFlow, kValvePressure, kValveChannelCount };
-inline constexpr const char* kValveChannelNames[kValveChannelCount] = {"open", "flow", "pressure"};
+enum ValveChannel { kValveOpen, kValveFlow, kValvePressure, kValveAntilag, kValveChannelCount };
+inline constexpr const char* kValveChannelNames[kValveChannelCount] = {"open", "flow", "pressure", "antilag"};
 inline int valve_channel_index(const char* name, size_t length) {
     for (int i = 0; i < kValveChannelCount; ++i)
         if (std::char_traits<char>::length(kValveChannelNames[i]) == length && std::char_traits<char>::compare(kValveChannelNames[i], name, length) == 0) return i;
@@ -348,9 +363,11 @@ inline std::string blow_off_entry(bool large, const std::string& mesh) {
 inline std::string blow_off_mesh_path(bool large) { return std::string("meshes/components/turbo_") + (large ? kBlowOffLargeId : kBlowOffId) + ".mesh"; }
 
 inline std::string wastegate_entry(const std::string& mesh) {
-    std::string descriptors = "{\"type\": \"type_f64_input\", \"name\": \"open\"}, {\"type\": \"type_f64_output\", \"name\": \"flow\"}, {\"type\": \"type_f64_output\", \"name\": \"pressure\"}";
+    std::string descriptors = "{\"type\": \"type_f64_input\", \"name\": \"open\"}, {\"type\": \"type_f64_input\", \"name\": \"antilag\"}, "
+        "{\"type\": \"type_f64_output\", \"name\": \"flow\"}, {\"type\": \"type_f64_output\", \"name\": \"pressure\"}";
     std::string description = "Electronic wastegate for a Turbo. Put it between the exhaust manifold (bottom port) and a vent or the turbo's exhaust out "
         "(top port). Its open input (0 to 1, from a data link or microcontroller) lets exhaust bypass the turbine, which caps boost. "
+        "Its antilag input (1 on, 0 off) burns fuel in the exhaust off throttle so the turbo stays spooled, with bangs and pops. "
         "Outputs flow (L/s) and pressure (kPa).";
     return std::string("    {\n") +
         "      \"id\": \"" + kWastegateId + "\",\n" +

@@ -110,6 +110,23 @@ int main() {
     { State st; Plant pl; run(st, spec(5), pl, 25, 20, 20); assert(st.spool < 0.4); }
     // Boost limit (kPa, game scale) caps the intake pressure.
     { State st; st.slots[kBoostLimit] = 49; Plant pl; Spec s = spec(3); double p = run(st, s, pl, s.rated_flow, s.rated_flow * 0.5, 20); assert(p < 5.05 && p > 3.5); }
+    // Boost outputs: over the air outside, in kPa and psi (full boost about 88 kPa, 12.8 psi).
+    { State st; Plant pl; Spec s = spec(3); double p = run(st, s, pl, s.rated_flow, s.rated_flow * 0.9, 20);
+      assert(near(st.slots[kBoost], (p - 1) * kKpaPerUnit, 2.5) && near(st.slots[kBoostPsi], st.slots[kBoost] * 0.1450377, 1e-9) && st.slots[kBoostPsi] > 10); }
+    // Antilag holds the spool off throttle (engine idling) and says so; it does nothing with the engine off.
+    { Spec s = spec(3);
+      auto idle = [&](bool antilag) { State st; Plant pl; run(st, s, pl, s.rated_flow, 0, 10);
+          for (int i = 0; i < 180; ++i) {
+              Inputs in; in.pressure[kHotIn] = 1.1; in.volume[kHotIn] = 2.2; in.pressure[kHotOut] = 1; in.volume[kHotOut] = 2;
+              in.pressure[kColdIn] = 1; in.volume[kColdIn] = 2; in.pressure[kColdOut] = 1; in.volume[kColdOut] = 2; in.dt = 1.0 / 60; in.antilag = antilag;
+              step(st, s, in);
+          }
+          return st; };
+      State off = idle(false), on = idle(true);
+      assert(on.spool > 0.7 && off.spool < on.spool - 0.3 && on.slots[kAntilagFiring] == 1 && off.slots[kAntilagFiring] == 0);
+      State dead; Plant pl; Inputs in; in.dt = 1.0 / 60; in.antilag = true; for (int i = 0; i < 4; ++i) in.pressure[i] = 1; step(dead, s, in);
+      assert(!dead.antilag_firing && dead.spool == 0); }
+    assert(valve_channel_index("antilag", 7) == kValveAntilag && channel_index("boost_psi", 9) == kBoostPsi);
     // Spool falls when the exhaust stops.
     { State st; Plant pl; Spec s = spec(3); run(st, s, pl, s.rated_flow, 0, 10); double was = st.spool; run(st, s, pl, 0, 0, 3); assert(st.spool < was * 0.2); }
     // Lift-off with boost trapped in the pipe: without a blow-off valve the compressor surges and the wheel slows
@@ -189,6 +206,11 @@ int main() {
             int whoosh = peak(bov, 1, true, 4800); assert(whoosh > 3000);
             peak(bov, 0, false, 5 * 48000); assert(peak(bov, 0, false, 4800) < 50);   // the tail dies away
           }
+        }
+        for (int z = kMinSize; z <= kMaxSize; ++z) {         // antilag bangs: silent until it fires, loud bangs, dies away
+            Synth al; al.voice = Voice::kAntilag; al.size = z; assert(peak(al, 0, false, 4800) == 0);
+            assert(peak(al, 0.5, true, 48000) > 8000);
+            peak(al, 0, false, 3 * 48000); assert(peak(al, 0, false, 4800) < 50);
         }
         Synth wild; peak(wild, std::nan(""), true, 4800); assert(peak(wild, 0.5, false, 4800) <= 32767);
     }

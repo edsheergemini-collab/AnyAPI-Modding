@@ -54,7 +54,11 @@ Two companion parts, in the gas parts with the turbos:
   vents 2.5 times faster. Outputs `open` (0/1), `flow` (L/s) and `pressure` (kPa).
 - **Turbo Wastegate.** Put it between the exhaust manifold (bottom port) and a vent or the turbo's exhaust outlet
   pipe (top port). Its `open` input (0 to 1, from a data link or microcontroller) lets exhaust bypass the turbine,
-  which caps boost. Outputs `flow` (L/s) and `pressure` (kPa).
+  which caps boost. Its `antilag` input (1 on, 0 off) turns on antilag for the turbo on the same exhaust pipe:
+  whenever the engine is running but its exhaust alone would let the turbo slow down (off throttle, idling), fuel
+  burnt in the exhaust holds the turbo at 80% spool, with bangs and crackles from the wastegate. Wire it to a
+  switch, or build your own logic in a microcontroller (only on a launch, only above some speed). Outputs `flow`
+  (L/s) and `pressure` (kPa).
 
 The wastegate uses the gas port's look for now. The turbo's own `surge` output is 1 while it surges.
 
@@ -70,7 +74,9 @@ Turbos and blow-off valves have their own sounds in place of the impeller hum, m
   3 dump (deep). Each is voiced for the turbo venting through it: a 2x2's is short and sharp, a 5x5's long
   and deep.
 
-The wastegate is silent. Sounds follow the vehicle volume slider and are heard by every player near the part.
+- **Antilag**: irregular gunshot bangs and crackles from the wastegate while antilag fires; deeper on bigger turbos.
+
+The wastegate is otherwise silent. Sounds follow the vehicle volume slider and are heard by every player near the part.
 
 ## Tooltip
 
@@ -83,7 +89,9 @@ Wire them from a data port, a data link or a microcontroller. Pressures use the 
 
 | Channel | Direction | Value |
 | --- | --- | --- |
-| `intake_pressure` | Output | Boost pressure at the cold outlet, kPa |
+| `intake_pressure` | Output | Pressure at the cold outlet, kPa (absolute: 9.8 is the air outside) |
+| `boost` | Output | Boost over the air outside, kPa (full boost is about 88) |
+| `boost_psi` | Output | The same in psi (full boost is about 12.8), for a boost gauge |
 | `exhaust_pressure` | Output | Pressure at the hot inlet, kPa |
 | `power_multiplier` | Output | The engine power multiplier this boost gives, 1 to 2 |
 | `spool` | Output | Shaft spool, 0 to 1 |
@@ -91,6 +99,7 @@ Wire them from a data port, a data link or a microcontroller. Pressures use the 
 | `exhaust_flow`, `intake_flow` | Output | Hot-side and cold-side flow, L/s |
 | `exhaust_temperature` | Output | Gas temperature at the hot inlet, °C |
 | `surge` | Output | 1 while the compressor surges (boost pushing back, no blow-off valve venting), else 0 |
+| `antilag` | Output | 1 while antilag is firing to hold the spool, else 0 |
 | `boost_limit` | Input | A wastegate: caps boost at this pressure in kPa (0 or unwired: no cap) |
 
 ## Getting it

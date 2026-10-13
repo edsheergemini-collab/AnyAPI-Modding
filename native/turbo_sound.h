@@ -1,5 +1,5 @@
 #pragma once
-// Turbo sounds, synthesized: spool whistle, compressor surge puffs and four blow-off valve sounds. No game or Windows
+// Turbo sounds, synthesized: spool whistle, compressor surge puffs, four blow-off valve sounds and antilag bangs. No game or Windows
 // dependencies, so tests/turbo_logic_test.cpp renders them on any platform.
 //
 // The game plays voice chat by streaming 48 kHz mono 16-bit PCM into a positional voice effect (application.audio
@@ -81,7 +81,9 @@ struct Sweep {
     }
 };
 
-enum class Voice { kTurbo, kBlowOff };
+// A wastegate firing antilag sends the same byte as a venting whoosh valve (encode_blow_off_factor with kWhoosh):
+// firing, how hard, and the turbo's size.
+enum class Voice { kTurbo, kBlowOff, kAntilag };
 
 // Each turbo size has its own voice: the 2x2 screams high and puffs fast, the 5x5 whooshes deep and slow.
 struct Character {
@@ -114,9 +116,10 @@ struct Synth {
     double surge_env = 0, surge_age = 0, surge_clock = 1, pulse_age = 1, pulse_gain = 0, pulse_period = 0.07;
     double whoosh_env = 0;
     double flutter_phase = 0, flutter_rate = 32, flutter_depth = 0.6, pop_age = 1;
+    double bang_env = 0, bang_clock = 1, bang_age = 1, bang_gain = 0, bang_period = 0.1, bang_pitch = 90, thump_phase = 0, crackle_age = 1;
     bool was_open = false;
     uint32_t rng = 0x12345678u;
-    BandPass hiss, click, whoosh, whoosh_low, rumble;
+    BandPass hiss, click, whoosh, whoosh_low, rumble, bang_body, bang_low, crackle;
     Sweep chirp, chirp_low, air, bov_chirp;
     bool init = false;
     double noise() {                   // white noise, -1..1
@@ -135,6 +138,7 @@ inline void render(Synth& s, double level, bool flag, int16_t* out, int n) {
     if (!s.init || s.tuned_size != s.size) {
         s.hiss.set(c.hiss_hz, 0.9); s.click.set(6500.0, 0.7);
         s.whoosh.set(3600.0 * bov_pitch, 0.7); s.whoosh_low.set(1400.0 * bov_pitch, 0.8); s.rumble.set(500.0 * bov_pitch, 0.8);
+        s.bang_body.set(1500.0 * bov_pitch, 0.6); s.bang_low.set(260.0 * bov_pitch, 0.9); s.crackle.set(4200.0, 0.8);
         s.init = true; s.tuned_size = s.size;
     }
     double target = std::isfinite(level) ? (level < 0 ? 0 : level > 1 ? 1 : level) : 0;
@@ -178,6 +182,36 @@ inline void render(Synth& s, double level, bool flag, int16_t* out, int n) {
             v += loud * c.air_gain * 4.0 * s.air.run(s.noise(), std::min(s.pitch * 0.85, 16000.0), 5.0);
             v += c.hiss_gain * s.spool * s.spool * s.hiss.run(s.noise());
             v += c.puff_gain * puffs;
+        } else if (s.voice == Voice::kAntilag) {
+            // Antilag: fuel lit in the exhaust manifold keeps the turbo spinning off throttle. Irregular gunshot bangs
+            // (a sharp crack, a low thump that drops in pitch) with crackles in between; harder antilag bangs
+            // more often. Bigger turbos bang deeper.
+            s.bang_env += ((flag ? 1.0 : 0.0) - s.bang_env) * (1.0 - std::exp(-dt / (flag ? 0.02 : 0.25)));
+            s.bang_clock += dt;
+            if (s.bang_env > 0.05 && s.bang_clock >= s.bang_period) {
+                s.bang_clock = 0;
+                s.bang_age = 0;
+                double r = 0.5 + 0.5 * s.noise();
+                s.bang_gain = s.bang_env * (r < 0.25 ? 0.45 : 0.7 + 0.3 * r);                // some pops, some bangs
+                s.bang_pitch = bov_pitch * (75.0 + 35.0 * (0.5 + 0.5 * s.noise()));
+                double rate = 5.0 + 11.0 * target;                                           // bangs a second
+                double n2 = 0.5 + 0.5 * s.noise();
+                s.bang_period = n2 < 0.2 ? 0.03 + 0.03 * n2 : (1.0 / rate) * (0.5 + 1.0 * n2);   // now and then a double
+            }
+            s.bang_age += dt;
+            double ba = s.bang_age;
+            double crack = ba < 0.0008 ? ba / 0.0008 : std::exp(-(ba - 0.0008) / 0.006);
+            double boom = ba < 0.002 ? ba / 0.002 : std::exp(-(ba - 0.002) / (0.05 * bov_length));
+            s.thump_phase += two_pi * s.bang_pitch * (1.0 + 1.5 * std::exp(-ba / 0.012)) * dt;
+            if (s.thump_phase > two_pi) s.thump_phase -= two_pi;
+            double nz = s.noise();
+            double bang = 2.2 * crack * (0.7 * nz + 1.6 * s.bang_body.run(nz)) + 1.6 * boom * (std::sin(s.thump_phase) + 0.8 * s.bang_low.run(nz));
+            // Crackle: sparse ticks while it fires, thickest just after a bang.
+            s.crackle_age += dt;
+            double chance = s.bang_env * (0.0006 + 0.004 * std::exp(-ba / 0.08));
+            if (0.5 + 0.5 * s.noise() < chance) s.crackle_age = 0;
+            double tick = std::exp(-s.crackle_age / 0.0012) * (0.4 + 0.4 * (0.5 + 0.5 * s.noise()));
+            v += s.bang_gain * bang + 0.9 * tick * s.crackle.run(s.noise());
         } else {
             // Blow-off: a burst of air when the valve opens, held while it vents, then a tail.
             //   Whoosh:  the classic "pssshh".
