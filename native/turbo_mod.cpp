@@ -58,6 +58,7 @@ constexpr ptrdiff_t pump_pressure = 872;             // m_pressure (head; shown 
 constexpr ptrdiff_t pump_display_power = 888;        // m_display_power
 constexpr ptrdiff_t pump_flow = 896;                 // m_flow (litres this tick)
 constexpr ptrdiff_t vehicle_gas_nodes = 2040;        // server_scene.vehicle.m_nodes_gas (vehicle_gas_node.container)
+constexpr ptrdiff_t content_amounts = 0;             // vehicle_gas_content.m_amounts (array<f64> per gas type: buffer, count)
 constexpr ptrdiff_t content_volume = 32;             // vehicle_gas_content.m_volume (f64, litres)
 constexpr ptrdiff_t content_capacity = 40;           // m_capacity (f64, litres)
 constexpr ptrdiff_t content_temperature = 48;        // m_temperature (f64, C)
@@ -184,6 +185,26 @@ void destroy_hot_side(HotSide* hot, void* vehicle) {
     HeapFree(GetProcessHeap(), 0, hot);
 }
 
+// Sets a content to ambient: tops it up with air, or removes the excess from every gas in proportion.
+void hold_ambient(void* content) {
+    double capacity = at<double>(content, off::content_capacity), volume = at<double>(content, off::content_volume);
+    if (!(capacity > 0) || !std::isfinite(volume)) return;
+    double temperature = kAmbientC;
+    if (volume < capacity - 1e-6) {
+        double missing = capacity - volume;
+        int32_t air = kGasAir;
+        g_content_modify(content, &air, &missing, &temperature);
+    } else if (volume > capacity + 1e-6) {
+        double excess = volume - capacity;
+        const double* amounts = at<const double*>(content, off::content_amounts);
+        int32_t count = at<int32_t>(content, off::content_amounts + 8);
+        if (!amounts || count <= 0 || count > 8 || !anymaker::readable(amounts, sizeof(double) * size_t(count))) return;
+        double removal[8]{};
+        for (int32_t i = 0; i < count; ++i) removal[i] = -excess * std::max(0.0, amounts[i]) / volume;
+        for (int32_t i = 0; i < count; ++i) if (removal[i] < 0) g_content_modify(content, &i, &removal[i], &temperature);
+    }
+}
+
 // ------------------------------------------------------------------------------------- impeller hooks
 using create_t = void (*)(void* self, void* vehicle);
 using destroy_t = void (*)(void* self, void* vehicle, void* scene);
@@ -230,15 +251,11 @@ void hk_tick(void* self, void* vehicle, void* scene) {
     Turbo& t = found->second;
     void* c0 = static_cast<uint8_t*>(self) + off::pump_content_0;
     void* c1 = static_cast<uint8_t*>(self) + off::pump_content_1;
-    // The compressor inlet is open to the air, like a real turbo's intake: top it up to ambient every tick. Game vents
-    // and filters only pass about 13.5 L/s, which starved the compressor in the first test. A pipe on the inlet still
-    // works (it can only add more air).
-    {
-        double capacity = at<double>(c0, off::content_capacity), volume = at<double>(c0, off::content_volume);
-        double missing = capacity - volume, temperature = kAmbientC;
-        int32_t air = kGasAir;
-        if (capacity > 0 && missing > 1e-6) g_content_modify(c0, &air, &missing, &temperature);
-    }
+    // The compressor inlet is open to the air, like a real turbo's intake: hold it at ambient every tick, both ways.
+    // Game vents only pass about 13.5 L/s, which starved the compressor in the first test; and boost left in the
+    // pipes when the engine stops flows back through the compressor and out here, instead of staying trapped.
+    // A pipe on the inlet still works.
+    hold_ambient(c0);
     void* contents[kNodeCount] = {c0, c1, t.hot ? t.hot->content[0] : nullptr, t.hot ? t.hot->content[1] : nullptr};
     Inputs in;
     for (int i = 0; i < kNodeCount; ++i) {
