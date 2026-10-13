@@ -191,7 +191,8 @@ void steady_camera(double* ret, const double* head, const double* back, double d
     double up_now[3] = {basis(head, g_up_axis)[0] * g_up_sign, basis(head, g_up_axis)[1] * g_up_sign, basis(head, g_up_axis)[2] * g_up_sign};
     double tumble = 1.0 - std::max(0.0, up_now[1]);   // 0 level, 1 on its side, 2 upside down
     if (!g_steady_active) { g_cam_yaw = yaw; g_cam_pitch = std::clamp(pitch, -1.0, 1.0); g_steady_active = true; }
-    double ky = 1.0 - std::exp(-dt / (0.12 + 1.5 * tumble)), kp = 1.0 - std::exp(-dt / (0.25 + 1.5 * tumble));
+    // Time constants 15% shorter than first tested (Nate: "a tad floaty").
+    double ky = 1.0 - std::exp(-dt / (0.10 + 1.28 * tumble)), kp = 1.0 - std::exp(-dt / (0.21 + 1.28 * tumble));
     g_cam_yaw += angle_diff(yaw, g_cam_yaw) * ky;
     g_cam_pitch += (std::clamp(pitch, -1.2, 1.2) - g_cam_pitch) * kp;
     double nb[3] = {-std::cos(g_cam_pitch) * std::sin(g_cam_yaw), -std::sin(g_cam_pitch), -std::cos(g_cam_pitch) * std::cos(g_cam_yaw)};
