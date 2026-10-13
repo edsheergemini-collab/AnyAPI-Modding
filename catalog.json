@@ -5,21 +5,21 @@
     {
       "Id": "anyapi",
       "Name": "AnyAPI",
-      "Version": "0.36.0",
-      "Revision": 39,
+      "Version": "0.37.0",
+      "Revision": 40,
       "MinimumApi": 0,
-      "Description": "Native mod framework for Anymaker 0.1.24, with creation balance snapshots including tank fluid mass.",
-      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/v0.36.0/AnyAPI-0.36.0.zip",
-      "Sha256": "1ba3fa9c836f0d25ee748ea3bbe8de420f162a7ac55b310f7aff90028cbe8d84",
+      "Description": "Native mod framework for Anymaker 0.1.25, with creation balance snapshots including tank fluid mass.",
+      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/v0.37.0/AnyAPI-0.37.0.zip",
+      "Sha256": "fed991325f63a10c1cdba9f9fd307af2c404805819fcd78ad89be24b42e493e9",
       "FileHashes": {
-        "dinput8.dll": "f57cd9b4a899811b3f4110bc9b566b2e4fe44c93b8fc611d5aaaa4709f936435"
+        "dinput8.dll": "3182fb126b07109aeafbb34fb9cb55f4178ffd81c76798845e43d081bb94c32d"
       },
       "GameBuilds": [
         {
-          "Version": "0.1.24",
-          "SteamBuild": 25826614,
-          "ExeSha256": "2bfa5396ba49cb902941afe65294403c0222e9266e35ce3e7131cb8185d336f7",
-          "GclSha256": "da170da347d494cf78b8ca43592e1981c5950528d27d0564b81ce8144f30622d"
+          "Version": "0.1.25",
+          "SteamBuild": 25904830,
+          "ExeSha256": "5c46cd34a3b00889ff36154976428ba43f6475430e92a2d113a360a78161a7d0",
+          "GclSha256": "626a994be960b7218409d9ca416d2664450231d1fc3295036fc77c81b8449355"
         }
       ]
     }
@@ -232,84 +232,84 @@
     {
       "Id": "enginesound",
       "Name": "EngineSound",
-      "Version": "0.2.1",
-      "Revision": 2,
+      "Version": "0.2.2",
+      "Revision": 3,
       "MinimumApi": 34,
-      "Description": "Engine sound presets (Muscle V8, Built 2JZ, Powerstroke, Hemi and more) and a Custom sound tuner in the Properties Tool engine window, synced for every player in co-op. Uses the experimental SDK; Anymaker 0.1.24 only.",
-      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/v0.35.0/EngineSound-0.2.1.zip",
-      "Sha256": "552a8f9cc0e70431b0738bf08e90a997b6f272325eba0f3b8d9d758c69565f14",
+      "Description": "Engine sound presets (Muscle V8, Built 2JZ, Powerstroke, Hemi and more) and a Custom sound tuner in the Properties Tool engine window, synced for every player in co-op. Uses the experimental SDK; Anymaker 0.1.25 only.",
+      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/v0.37.0/EngineSound-0.2.2.zip",
+      "Sha256": "a6ce38dd9a5542bb8d90bb72b61dda418a4b87e42b58f0c76e64efbc0f3d9ec4",
       "FileHashes": {
-        "AnyAPI and Modding/mods/EngineSound.dll": "775bb45b51b8db591863a4a4d085c2d15b643d888bc41ed955182180a8aa81ff"
+        "AnyAPI and Modding/mods/EngineSound.dll": "96bca06f792ec8631bac775dc82d9feccad9465e61f4e5170789f9f23b55f1c7"
       },
       "GameBuilds": [
         {
-          "Version": "0.1.24",
-          "SteamBuild": 25826614,
-          "ExeSha256": "2bfa5396ba49cb902941afe65294403c0222e9266e35ce3e7131cb8185d336f7",
-          "GclSha256": "da170da347d494cf78b8ca43592e1981c5950528d27d0564b81ce8144f30622d"
+          "Version": "0.1.25",
+          "SteamBuild": 25904830,
+          "ExeSha256": "5c46cd34a3b00889ff36154976428ba43f6475430e92a2d113a360a78161a7d0",
+          "GclSha256": "626a994be960b7218409d9ca416d2664450231d1fc3295036fc77c81b8449355"
         }
       ]
     },
     {
       "Id": "anymirror",
       "Name": "AnyMirror",
-      "Version": "1.1.0",
-      "Revision": 2,
+      "Version": "1.1.1",
+      "Revision": 3,
       "MinimumApi": 34,
-      "Description": "Mirrored building across a toggleable mirror wall: edges with either edge tool, plates with the add plate tool, and removals with the remove tool. Keybinds and a wall strength slider. Uses the experimental SDK; Anymaker 0.1.24 only.",
-      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/mods-2026.10.12.1/AnyMirror-1.1.0.zip",
-      "Sha256": "d62fac8679e3f5d9e1067d28a7294c1c4c1d83c5c9c8d5582ee167f4363eaf5b",
+      "Description": "Mirrored building across a toggleable mirror wall: edges with either edge tool, plates with the add plate tool, and removals with the remove tool. Keybinds and a wall strength slider. Uses the experimental SDK; Anymaker 0.1.25 only.",
+      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/v0.37.0/AnyMirror-1.1.1.zip",
+      "Sha256": "e23fc05f3199a2576b19cacdf5aa37f819052a96c4f3228f613e447921e4e215",
       "FileHashes": {
-        "AnyAPI and Modding/mods/AnyMirror.dll": "4eb4f9c5269b50abeb965ed326c82e25b6a7d2b447633318a68b08075fe93403"
+        "AnyAPI and Modding/mods/AnyMirror.dll": "218c9d60b63c975cb139cc5072bdda249c05692303652c73373bc5a8625c156a"
       },
       "GameBuilds": [
         {
-          "Version": "0.1.24",
-          "SteamBuild": 25826614,
-          "ExeSha256": "2bfa5396ba49cb902941afe65294403c0222e9266e35ce3e7131cb8185d336f7",
-          "GclSha256": "da170da347d494cf78b8ca43592e1981c5950528d27d0564b81ce8144f30622d"
+          "Version": "0.1.25",
+          "SteamBuild": 25904830,
+          "ExeSha256": "5c46cd34a3b00889ff36154976428ba43f6475430e92a2d113a360a78161a7d0",
+          "GclSha256": "626a994be960b7218409d9ca416d2664450231d1fc3295036fc77c81b8449355"
         }
       ]
     },
     {
       "Id": "gpspart",
       "Name": "GpsPart",
-      "Version": "1.0.0",
-      "Revision": 1,
+      "Version": "1.0.1",
+      "Revision": 2,
       "MinimumApi": 36,
-      "Description": "Adds a GPS Sensor part with position, altitude, heading, pitch, roll, speed, acceleration and waypoint distance/bearing data channels. Single player only. Uses the experimental SDK; Anymaker 0.1.24 only.",
-      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/mods-2026.10.11/GpsPart-1.0.0.zip",
-      "Sha256": "0e81d16729be7ff7302ad8aa6aa1b46b4852ecded9303e139227633189efc2df",
+      "Description": "Adds a GPS Sensor part with position, altitude, heading, pitch, roll, speed, acceleration and waypoint distance/bearing data channels. Single player only. Uses the experimental SDK; Anymaker 0.1.25 only.",
+      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/v0.37.0/GpsPart-1.0.1.zip",
+      "Sha256": "04add583c5cbd3005b4c94c0de64e96660f9fd0b47eafeb03e594a58e462f3f3",
       "FileHashes": {
-        "AnyAPI and Modding/mods/GpsPart.dll": "9a8d26f2e2c4f84b4e63109d01f3a5d6697b7bce523fb9cea6c8964af81a5db5"
+        "AnyAPI and Modding/mods/GpsPart.dll": "1b4ec3a1497e36a0c548abab765001fa8d188e290f60c30d23e98a0ae3c5d81a"
       },
       "GameBuilds": [
         {
-          "Version": "0.1.24",
-          "SteamBuild": 25826614,
-          "ExeSha256": "2bfa5396ba49cb902941afe65294403c0222e9266e35ce3e7131cb8185d336f7",
-          "GclSha256": "da170da347d494cf78b8ca43592e1981c5950528d27d0564b81ce8144f30622d"
+          "Version": "0.1.25",
+          "SteamBuild": 25904830,
+          "ExeSha256": "5c46cd34a3b00889ff36154976428ba43f6475430e92a2d113a360a78161a7d0",
+          "GclSha256": "626a994be960b7218409d9ca416d2664450231d1fc3295036fc77c81b8449355"
         }
       ]
     },
     {
       "Id": "thirdperson",
       "Name": "ThirdPerson",
-      "Version": "0.1.0",
-      "Revision": 1,
+      "Version": "0.1.1",
+      "Revision": 2,
       "MinimumApi": 36,
-      "Description": "Third-person camera: F5 switches between first and third person, Alt + mouse wheel sets the follow distance (1-20 m), with a follow-distance setting. Uses the experimental SDK; Anymaker 0.1.24 only.",
-      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/mods-2026.10.12/ThirdPerson-0.1.0.zip",
-      "Sha256": "61bd1b5561a8857d463e4727ef9e4db6da3b500fd9ea044722e2eeddd869c854",
+      "Description": "Third-person camera: F5 switches between first and third person, Alt + mouse wheel sets the follow distance (1-20 m), with a follow-distance setting. Uses the experimental SDK; Anymaker 0.1.25 only.",
+      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/v0.37.0/ThirdPerson-0.1.1.zip",
+      "Sha256": "e74aaa01e64cd48d83532b4d408cf6552da0c9d6c5e299c57c52ce2bc1bfdfd7",
       "FileHashes": {
-        "AnyAPI and Modding/mods/ThirdPerson.dll": "92001770800706f86f772aad2f97d6e55ae02d1dd0ab2ff2b18074a0af981c8b"
+        "AnyAPI and Modding/mods/ThirdPerson.dll": "1787d4344d707aec084ba05eda189ac310e5ae1b8ae28f4cfb73074e497b83a7"
       },
       "GameBuilds": [
         {
-          "Version": "0.1.24",
-          "SteamBuild": 25826614,
-          "ExeSha256": "2bfa5396ba49cb902941afe65294403c0222e9266e35ce3e7131cb8185d336f7",
-          "GclSha256": "da170da347d494cf78b8ca43592e1981c5950528d27d0564b81ce8144f30622d"
+          "Version": "0.1.25",
+          "SteamBuild": 25904830,
+          "ExeSha256": "5c46cd34a3b00889ff36154976428ba43f6475430e92a2d113a360a78161a7d0",
+          "GclSha256": "626a994be960b7218409d9ca416d2664450231d1fc3295036fc77c81b8449355"
         }
       ]
     }
