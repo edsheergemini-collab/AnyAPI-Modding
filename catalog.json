@@ -5,14 +5,14 @@
     {
       "Id": "anyapi",
       "Name": "AnyAPI",
-      "Version": "0.37.0",
-      "Revision": 40,
+      "Version": "0.38.0",
+      "Revision": 41,
       "MinimumApi": 0,
-      "Description": "Native mod framework for Anymaker 0.1.25, with creation balance snapshots including tank fluid mass.",
-      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/v0.37.0/AnyAPI-0.37.0.zip",
-      "Sha256": "fed991325f63a10c1cdba9f9fd307af2c404805819fcd78ad89be24b42e493e9",
+      "Description": "Native mod framework for Anymaker 0.1.25; the item catalog now includes parts and items added by other mods.",
+      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/v0.38.0/AnyAPI-0.38.0.zip",
+      "Sha256": "b7e1cbaff2772ba2bf03af41891355b0ac6323f2658919467ca0cec014f8ab8c",
       "FileHashes": {
-        "dinput8.dll": "3182fb126b07109aeafbb34fb9cb55f4178ffd81c76798845e43d081bb94c32d"
+        "dinput8.dll": "230d3b7f0a4b10f0cec0f465d930395f23f977228db74d6e6361790ebc2705de"
       },
       "GameBuilds": [
         {
@@ -61,14 +61,14 @@
     {
       "Id": "anyinventory",
       "Name": "AnyInventory",
-      "Version": "0.27.0",
-      "Revision": 27,
+      "Version": "0.28.0",
+      "Revision": 28,
       "MinimumApi": 27,
       "Description": "Item search, previews, favorites and mode-limited Add.",
-      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/v0.27.0/AnyInventory-0.27.0.zip",
-      "Sha256": "2732620a2af2ce5012d98199fdadbd324e4deacb4fe7615b9e57fa9b44714703",
+      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/v0.38.0/AnyInventory-0.28.0.zip",
+      "Sha256": "94397dbcf21d29f5914dc39ff561393de7b8e48f37130669cb594c34f859f946",
       "FileHashes": {
-        "AnyAPI and Modding/mods/AnyInventory.dll": "1159c43e98158b7071308a3a63199ea00ff15971f0b5029926bb39f0622ff04e"
+        "AnyAPI and Modding/mods/AnyInventory.dll": "c569c763a9f826a664e4ce46dfe67dfb3908550a29f469ed4ab8962e579b523b"
       },
       "GameBuilds": [
         {
