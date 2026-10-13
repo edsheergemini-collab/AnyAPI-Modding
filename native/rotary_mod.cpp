@@ -438,16 +438,22 @@ void install_sound() {
 
 void install_hooks() {
     using namespace anymaker::experimental;
+    // Each lookup scans the game's code, so what is found is kept and only the rest is looked up again; after the
+    // first 30 s the retries slow to every 5 s. Nothing is hooked until everything is found.
+    void **add = nullptr, **create = nullptr, **load_cell = nullptr;
+    self_fn_t fctor = nullptr, fdtor = nullptr;
+    file_load_t fload = nullptr;
+    string_ctor_t sc = nullptr;
     for (int attempt = 0; attempt < 180 && !g_stop; ++attempt) {
-        if (attempt) Sleep(1000);
+        if (attempt) Sleep(attempt < 30 ? 1000 : 5000);
         if (!matching_build()) { if (attempt == 0) log(1, "game build does not match the SDK reference; Rotary stays off"); return; }
-        void** add = route_cell(bind::definitions_add_definitions);
-        void** create = hook_cell(bind::engine_create);
-        auto fctor = reinterpret_cast<self_fn_t>(function(bind::definition_file_ctor));
-        auto fdtor = reinterpret_cast<self_fn_t>(function(bind::definition_file_dtor));
-        void** load_cell = route_cell(bind::definition_file_load);
-        auto fload = load_cell ? reinterpret_cast<file_load_t>(*load_cell) : nullptr;
-        auto sc = reinterpret_cast<string_ctor_t>(native(anymaker::sym::string_ctor_cstr_rva));
+        if (!add) add = route_cell(bind::definitions_add_definitions);
+        if (!create) create = hook_cell(bind::engine_create);
+        if (!fctor) fctor = reinterpret_cast<self_fn_t>(function(bind::definition_file_ctor));
+        if (!fdtor) fdtor = reinterpret_cast<self_fn_t>(function(bind::definition_file_dtor));
+        if (!load_cell) load_cell = route_cell(bind::definition_file_load);
+        if (!fload && load_cell) fload = reinterpret_cast<file_load_t>(*load_cell);
+        if (!sc) sc = reinterpret_cast<string_ctor_t>(native(anymaker::sym::string_ctor_cstr_rva));
         bool core = add && create && fctor && fdtor && fload && sc;
         if (!core) {
             if (attempt == 179)
