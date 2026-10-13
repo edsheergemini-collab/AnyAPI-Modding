@@ -126,6 +126,7 @@ struct ValvePart {
                                                       // never freed (the Properties Tool holds pointers to them)
     double vented = 0;                                // litres the turbos vented through it since its last tick
     double open_until = 0;                            // seconds (now_seconds) it shows open after venting
+    int vent_size = 3;                                // size of the turbo that last vented through it (its sound)
 };
 std::unordered_map<const void*, ValvePart> g_valves;
 std::unordered_map<const void*, int> g_definition_size;   // definition pointer -> 2-5, or 0 for other parts
@@ -305,7 +306,7 @@ template <class F> void for_each_on_island(void* node, F f) {
 }
 
 // Blow-off valves on the turbo's boost pipe vent the boost the turbo can no longer hold. Returns true if any vented.
-bool vent_blow_off_valves(void* turbo, double excess, double dt) {
+bool vent_blow_off_valves(void* turbo, int size, double excess, double dt) {
     if (!(excess > 0) || !(dt > 0)) return false;
     bool vented = false;
     double now = now_seconds();
@@ -321,6 +322,7 @@ bool vent_blow_off_valves(void* turbo, double excess, double dt) {
         if (want <= 0) return;
         g_content_move(in, out, &want);
         found->second.vented += want;
+        found->second.vent_size = size;
         found->second.open_until = now + 0.3;
         vented = true;
     });
@@ -352,7 +354,7 @@ void tick_valve(void* self, int kind) {
     at<double>(self, off::pump_display_power) = 0;
     at<double>(self, off::pump_flow) = litres;
     int style = v.setting && std::isfinite(v.setting[1]) ? int(std::lround(v.setting[1])) : kWhoosh;
-    double sound = kind == kKindBlowOff ? encode_blow_off_factor(v.state.slots[kValveOpen] > 0.5, v.state.flow / 60.0, style) : 0.0;
+    double sound = kind == kKindBlowOff ? encode_blow_off_factor(v.state.slots[kValveOpen] > 0.5, v.state.flow / 60.0, style, v.vent_size) : 0.0;
     g_property_set(static_cast<uint8_t*>(self) + off::pump_factor_speed, &sound);
 }
 
@@ -384,7 +386,7 @@ void hk_tick(void* self, void* vehicle, void* scene) {
     }
     if (contents[kHotIn]) in.exhaust_temperature = at<double>(contents[kHotIn], off::content_temperature);
     in.dt = g_delta_time && std::isfinite(*g_delta_time) ? *g_delta_time : 1.0 / 60.0;
-    in.bov_venting = vent_blow_off_valves(self, (in.pressure[kColdOut] - in.pressure[kColdIn]) - head_for(t.state, in.pressure[kColdIn]), in.dt);
+    in.bov_venting = vent_blow_off_valves(self, t.size, (in.pressure[kColdOut] - in.pressure[kColdIn]) - head_for(t.state, in.pressure[kColdIn]), in.dt);
     Step o = step(t.state, t.spec, in);
     if (t.hot) {
         if (o.turbine_move > 0) g_content_move(contents[kHotIn], contents[kHotOut], &o.turbine_move);
@@ -700,7 +702,7 @@ void stream_sound(void* self, int kind, const double* dt) {
     bool flag = false;
     if (kind == kKindBlowOff) {
         v.synth.voice = Voice::kBlowOff;
-        decode_blow_off_factor(factor, flag, level, v.synth.sound);
+        decode_blow_off_factor(factor, flag, level, v.synth.sound, v.synth.size);
     } else {
         v.synth.voice = Voice::kTurbo;
         v.synth.size = kind;

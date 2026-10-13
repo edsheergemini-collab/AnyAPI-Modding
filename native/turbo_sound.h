@@ -29,20 +29,28 @@ inline void decode_turbo_factor(double factor, double& spool, bool& surging) {
 }
 // Blow-off sounds the valve can make, picked in the Properties Tool ("Sound effect").
 enum BlowOffSound { kWhoosh = 0, kFlutter = 1, kChirp = 2, kDump = 3, kBlowOffSoundCount = 4 };
-// A blow-off valve sends 0 when shut; open, it sends its sound in steps of 0.2 (0.2, 0.4, 0.6, 0.8) plus up to
-// 0.19 for how hard it vents.
-inline double encode_blow_off_factor(bool open, double intensity, int sound = kWhoosh) {
+// A blow-off valve sends 0 when shut. Open, it sends one byte b = 51 * (sound + 1) + sub, where sub carries the
+// size of the turbo venting through it and how hard (10 levels): sub = 12 * (size - 2) + 1 + level. The spare
+// step either side keeps it readable if the game rounds the byte one way or the other.
+inline double encode_blow_off_factor(bool open, double intensity, int sound = kWhoosh, int size = 3) {
+    if (!open) return 0.0;
     double i = std::isfinite(intensity) ? (intensity < 0 ? 0 : intensity > 1 ? 1 : intensity) : 0;
     int k = sound < 0 || sound >= kBlowOffSoundCount ? 0 : sound;
-    return open ? 0.2 + 0.2 * k + 0.19 * i : 0.0;
+    int z = size < 2 ? 2 : size > 5 ? 5 : size;
+    int level = int(i * 9.0 + 0.5);
+    return (51.0 * (k + 1) + 12 * (z - 2) + 1 + level) / 255.0;
 }
-inline void decode_blow_off_factor(double factor, bool& open, double& intensity, int& sound) {
+inline void decode_blow_off_factor(double factor, bool& open, double& intensity, int& sound, int& size) {
     double f = std::isfinite(factor) ? (factor < 0 ? 0 : factor > 1 ? 1 : factor) : 0;
-    open = f > 0.1;
-    sound = open ? int((f - 0.195) / 0.2) : sound;
-    sound = sound < 0 ? 0 : sound >= kBlowOffSoundCount ? kBlowOffSoundCount - 1 : sound;
-    intensity = open ? (f - 0.2 - 0.2 * sound) / 0.19 : 0.0;
-    intensity = intensity < 0 ? 0 : intensity > 1 ? 1 : intensity;
+    int b = int(f * 255.0 + 0.5);
+    open = b >= 26;
+    if (!open) { intensity = 0; return; }                 // shut keeps the last sound and size for the tail
+    int k = b / 51 - 1, sub = b % 51;
+    sound = k < 0 ? 0 : k >= kBlowOffSoundCount ? kBlowOffSoundCount - 1 : k;
+    int z = 2 + sub / 12;
+    size = z > 5 ? 5 : z;
+    int level = sub % 12 - 1;
+    intensity = (level < 0 ? 0 : level > 9 ? 9 : level) / 9.0;
 }
 
 // RBJ band-pass biquad (constant 0 dB peak gain).
@@ -98,6 +106,7 @@ struct Synth {
     Voice voice = Voice::kTurbo;
     int size = 3;                      // turbo size 2-5 (see character())
     int sound = kWhoosh;               // blow-off valve sound (BlowOffSound)
+    int tuned_size = 0;                // size the filters were set for
     // smoothed state
     double spool = 0, pitch = 0, phase1 = 0, phase2 = 0;
     double surge_env = 0, surge_age = 0, surge_clock = 1, pulse_age = 1, pulse_gain = 0, pulse_period = 0.07;
@@ -115,13 +124,16 @@ struct Synth {
 };
 
 // Renders n samples. Turbo voice: level = spool 0-1, flag = surging. Blow-off voice: flag = venting, level = how
-// hard (0-1), in the synth's sound.
+// hard (0-1), in the synth's sound, voiced for the turbo size venting through it.
 inline void render(Synth& s, double level, bool flag, int16_t* out, int n) {
     const Character c = character(s.size);
-    if (!s.init) {
-        s.hiss.set(c.hiss_hz, 0.9); s.click.set(6500.0, 0.7); s.whoosh.set(3600.0, 0.7); s.whoosh_low.set(1400.0, 0.8);
-        s.rumble.set(500.0, 0.8);
-        s.init = true;
+    // A blow-off valve on a bigger turbo dumps more air: lower, longer and, for the flutter, slower.
+    const double bov_pitch = s.size <= 2 ? 1.25 : s.size == 4 ? 0.82 : s.size >= 5 ? 0.68 : 1.0;
+    const double bov_length = s.size <= 2 ? 0.75 : s.size == 4 ? 1.25 : s.size >= 5 ? 1.5 : 1.0;
+    if (!s.init || s.tuned_size != s.size) {
+        s.hiss.set(c.hiss_hz, 0.9); s.click.set(6500.0, 0.7);
+        s.whoosh.set(3600.0 * bov_pitch, 0.7); s.whoosh_low.set(1400.0 * bov_pitch, 0.8); s.rumble.set(500.0 * bov_pitch, 0.8);
+        s.init = true; s.tuned_size = s.size;
     }
     double target = std::isfinite(level) ? (level < 0 ? 0 : level > 1 ? 1 : level) : 0;
     const double dt = 1.0 / kSampleRate, two_pi = 6.283185307179586;
@@ -175,7 +187,7 @@ inline void render(Synth& s, double level, bool flag, int16_t* out, int n) {
             bool dump = s.sound == kDump;
             double hold = flag ? 0.55 + 0.45 * target : 0.0;
             if (s.whoosh_env < hold) s.whoosh_env += (hold - s.whoosh_env) * (1.0 - std::exp(-dt / 0.01));
-            else s.whoosh_env *= std::exp(-dt / (flag ? (dump ? 0.9 : 0.6) : (dump ? 0.45 : 0.28)));
+            else s.whoosh_env *= std::exp(-dt / (bov_length * (flag ? (dump ? 0.9 : 0.6) : (dump ? 0.45 : 0.28))));
             double nz = s.noise();
             double air = dump ? 0.35 * s.whoosh.run(nz) + 0.55 * s.whoosh_low.run(nz) + 0.6 * s.rumble.run(nz)
                               : 0.55 * s.whoosh.run(nz) + 0.30 * s.whoosh_low.run(nz);
@@ -184,7 +196,7 @@ inline void render(Synth& s, double level, bool flag, int16_t* out, int n) {
                 s.flutter_phase += s.flutter_rate * dt;
                 if (s.flutter_phase >= 1.0) {
                     s.flutter_phase -= 1.0;
-                    s.flutter_rate = 30.0 + 12.0 * s.whoosh_env + 6.0 * s.noise();
+                    s.flutter_rate = (30.0 + 12.0 * s.whoosh_env + 6.0 * s.noise()) / bov_length;
                     s.flutter_depth = 0.55 + 0.35 * (0.5 + 0.5 * s.noise());
                 }
                 gain = 1.25 * (1.0 - s.flutter_depth * (0.5 + 0.5 * std::cos(two_pi * s.flutter_phase)));
@@ -192,7 +204,7 @@ inline void render(Synth& s, double level, bool flag, int16_t* out, int n) {
             v += s.whoosh_env * gain * air;
             s.pop_age += dt;
             if (s.sound == kChirp && s.pop_age < 0.2) {
-                double centre = 1700.0 + 3300.0 * std::exp(-s.pop_age / 0.035);
+                double centre = bov_pitch * (1700.0 + 3300.0 * std::exp(-s.pop_age / 0.035));
                 double env = s.pop_age < 0.003 ? s.pop_age / 0.003 : std::exp(-(s.pop_age - 0.003) / 0.05);
                 v += 0.5 * env * s.bov_chirp.run(s.noise(), centre, 9.0);   // band-pass peak gain is its Q
             }

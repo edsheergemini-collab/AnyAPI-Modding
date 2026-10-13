@@ -154,13 +154,15 @@ int main() {
             assert(!surging && near(got, spool, 0.01));
             decode_turbo_factor(byte(encode_turbo_factor(spool, true)), got, surging);
             assert(surging && near(got, spool, 0.01));
-            for (int k = 0; k < kBlowOffSoundCount; ++k) {
-                bool open; double level; int sound = -1;
-                decode_blow_off_factor(byte(encode_blow_off_factor(true, spool, k)), open, level, sound);
-                assert(open && sound == k && near(level, spool, 0.03));
-                decode_blow_off_factor(byte(encode_blow_off_factor(false, spool, k)), open, level, sound);
-                assert(!open && level == 0 && sound == k);   // shut keeps the last sound for the tail
-            }
+            for (int k = 0; k < kBlowOffSoundCount; ++k)
+                for (int z = kMinSize; z <= kMaxSize; ++z)
+                    for (double nudge : {-1.0, 0.0, 1.0}) {          // the game may round the byte either way
+                        bool open; double level; int sound = -1, size = -1;
+                        decode_blow_off_factor(byte(encode_blow_off_factor(true, spool, k, z)) + nudge / 255.0, open, level, sound, size);
+                        assert(open && sound == k && size == z && near(level, spool, 0.07 + 0.12 * std::abs(nudge)));
+                        decode_blow_off_factor(byte(encode_blow_off_factor(false, spool, k, z)), open, level, sound, size);
+                        assert(!open && level == 0 && sound == k && size == z);   // shut keeps the last sound for the tail
+                    }
         }
         auto peak = [](Synth& s, double level, bool flag, int samples) {
             std::vector<int16_t> pcm(static_cast<size_t>(samples));
@@ -178,9 +180,11 @@ int main() {
             assert(peak(t, 0.7, true, 9600) > 3000);
         }
         for (int k = 0; k < kBlowOffSoundCount; ++k) {
-            Synth bov; bov.voice = Voice::kBlowOff; bov.sound = k; assert(peak(bov, 0, false, 4800) == 0);
+          for (int z = kMinSize; z <= kMaxSize; ++z) {
+            Synth bov; bov.voice = Voice::kBlowOff; bov.sound = k; bov.size = z; assert(peak(bov, 0, false, 4800) == 0);
             int whoosh = peak(bov, 1, true, 4800); assert(whoosh > 3000);
-            peak(bov, 0, false, 4 * 48000); assert(peak(bov, 0, false, 4800) < 50);   // the tail dies away
+            peak(bov, 0, false, 5 * 48000); assert(peak(bov, 0, false, 4800) < 50);   // the tail dies away
+          }
         }
         Synth wild; peak(wild, std::nan(""), true, 4800); assert(peak(wild, 0.5, false, 4800) <= 32767);
     }

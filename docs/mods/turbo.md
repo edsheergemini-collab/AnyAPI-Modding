@@ -65,7 +65,8 @@ Turbos and blow-off valves have their own sounds in place of the impeller hum, m
 - **Surge** (no blow-off valve, throttle lifted): "stu-stu-stu", quick puffs of air as boost pushes back through
   the compressor, slowing as the boost runs out. Bigger turbos puff deeper and slower.
 - **Blow-off**: pick the valve's sound in the Properties Tool (**Sound effect**): 0 whoosh, 1 flutter, 2 chirp,
-  3 dump (deep). Like the spring, it is not saved yet.
+  3 dump (deep). Each is voiced for the turbo venting through it: a 2x2's is short and sharp, a 5x5's long
+  and deep. Like the spring, it is not saved yet.
 
 The wastegate is silent. Sounds follow the vehicle volume slider and are heard by every player near the part.
 
