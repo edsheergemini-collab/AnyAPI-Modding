@@ -229,6 +229,9 @@ constexpr uint32_t buffer_reset_rva = 0x41c40;      // binary.buffer.reset (allo
 constexpr int32_t kGroupVehicle = 4;                // e_audio_group.vehicle: follows the vehicle volume slider
 constexpr double kRange = 140.0;                    // metres
 constexpr double kLead = 0.08;                      // seconds of sound queued ahead
+// The voice object (what play_voice hands back) keeps the PCM still to play: a byte buffer whose size is at +0x78 and
+// a read cursor in samples at +0x80 (effect_3d.append_audio_data's handler and the mixer, game.exe 0xe85f0/0xe86e0).
+constexpr int kVoiceBytes = 0x78, kVoiceCursor = 0x80;
 }  // namespace audio
 struct GameBuffer { void* data; int32_t size; uint32_t pad; };
 static_assert(sizeof(GameBuffer) == 16, "binary.buffer");
@@ -254,6 +257,7 @@ struct ClientEngine {
     Synth synth;
     double start = 0, last_tick = 0, retry_at = 0;
     long long written = 0;                           // samples queued since start
+    bool rate_logged = false;
     double position[3]{}, velocity[3]{};
     bool placed = false;
     double game_volume = 0;                          // the stock power voice's volume this tick (> 0 while it runs)
@@ -287,6 +291,15 @@ void hk_vol_speed(uint8_t* single, const double* volume, const double* speed, co
     if (o == off::voice_knock && at<uint8_t>(e, off::client_is_damage)) return original(single, volume, speed, effect, group, pos);
     double zero = 0;
     original(single, &zero, speed, effect, group, pos);
+}
+
+// Samples the voice still has to play, or -1 when its fields don't look right.
+long long voice_queued(void* effect) {
+    auto* base = static_cast<uint8_t*>(effect);
+    if (!effect || !anymaker::readable(base + audio::kVoiceBytes, 0x10)) return -1;
+    int32_t bytes = at<int32_t>(effect, audio::kVoiceBytes), cursor = at<int32_t>(effect, audio::kVoiceCursor);
+    if (bytes < 0 || cursor < 0 || bytes > 64 * kSampleRate) return -1;
+    return std::max<long long>(0, bytes / 2 - cursor);    // the audio thread may be mid-update: never negative
 }
 
 void stream_sound(void* self, const double* dt) {
@@ -335,9 +348,17 @@ void stream_sound(void* self, const double* dt) {
         v.start = now; v.written = 0;
     }
     g_effect_place(&v.effect, v.position, v.velocity);
-    // Keep about kLead seconds queued. After a stall (a pause, a hitch) the queue ran dry: start again from now.
+    // Keep about kLead seconds queued. The voice's own queue says how much is still to play: the game can play it
+    // slower than real time or start late, and counting by the clock alone let a backlog build up until the sound
+    // ran seconds behind the engine. Without it, count by the clock; after a stall the queue ran dry: start again.
     long long played = (long long)((now - v.start) * kSampleRate);
+    long long queued = voice_queued(v.effect);
+    if (queued >= 0) played = v.written - queued;
     if (v.written < played) v.written = played;
+    if (!v.rate_logged && queued >= 0 && now - v.start > 10.0) {
+        v.rate_logged = true;
+        log(0, "rotary sound plays %.0f samples/s, %.0f ms queued", double(v.written - queued) / (now - v.start), queued * 1000.0 / kSampleRate);
+    }
     long long want = played + (long long)(audio::kLead * kSampleRate) - v.written;
     if (want <= 0) return;
     int n = int(std::min<long long>(want, kSampleRate / 5));

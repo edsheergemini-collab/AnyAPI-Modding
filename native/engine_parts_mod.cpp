@@ -12,7 +12,7 @@
 #include "anyapi_services_v1.h"
 #include <thread>
 
-namespace turbo { void init(const AnyModHostV1& h); void start(); void shutdown(); }
+namespace turbo { void init(const AnyModHostV1& h); void ready(); void start(); void shutdown(); }
 namespace rotary { void init(const AnyModHostV1& h); void start(); void shutdown(); }
 
 extern "C" __declspec(dllexport) bool AnyAPI_ModInit(const AnyModHostV1* h, AnyModCallbacksV1* out) {
@@ -24,6 +24,7 @@ extern "C" __declspec(dllexport) bool AnyAPI_ModInit(const AnyModHostV1* h, AnyM
     return true;
 }
 extern "C" __declspec(dllexport) void AnyAPI_ModReady() {
+    turbo::ready();                                  // Mod Settings rows (AnyHelpers) are registered here
     // Resolving scans game memory: keep it off the loader and frame threads. One thread, one part after the other,
     // because both hook some of the same game functions and a cell must not be hooked from two threads at once.
     std::thread([] { turbo::start(); rotary::start(); }).detach();

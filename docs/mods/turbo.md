@@ -126,6 +126,8 @@ Turbos and blow-off valves have their own sounds in place of the impeller hum, m
 - **Antilag**: irregular gunshot bangs and crackles from the wastegate while antilag fires; deeper on bigger turbos.
 
 The wastegate is otherwise silent. Sounds follow the vehicle volume slider and are heard by every player near the part.
+With AnyHelpers installed, **Mod Settings > AnyEngineParts > Turbo volume** sets how loud all of them are, from 0 to
+200 % (100 is normal). It applies to your game only.
 
 ## Tooltip
 

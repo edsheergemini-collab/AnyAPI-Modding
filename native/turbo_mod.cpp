@@ -19,6 +19,7 @@
 #include <windows.h>
 #include "anyapi_services_v1.h"
 #include "anyapi_experimental.hpp"
+#include "anyhelpers_settings_v1.h"
 #include "turbo_bindings.h"
 #include "route_cell.h"
 #include "turbo_logic.h"
@@ -27,6 +28,7 @@
 #include "turbo_upkeep_mesh.h"
 #include "turbo_health.h"
 #include "turbo_wear_store.h"
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdarg>
@@ -1198,6 +1200,36 @@ long long voice_queued(void* effect) {
     return std::max<long long>(0, bytes / 2 - cursor);    // the audio thread may be mid-update: never negative
 }
 
+// Turbo volume (Mod Settings, AnyHelpers): 0-200 %, applied to every sound this file makes (whistle, flutter,
+// blow-off, antilag). Without AnyHelpers it stays at 100 %.
+const AnyHelpersSettingsV1* g_settings = nullptr;
+uint64_t g_volume_token = 0, g_settings_revision = UINT64_MAX;
+double g_volume = 1.0;
+
+void register_settings() {
+    auto services = AnyAPI_Services();
+    auto* s = services ? static_cast<const AnyHelpersSettingsV1*>(services->query("anyhelpers.settings", 1)) : nullptr;
+    if (!s || s->struct_size != sizeof(*s) || s->version != 1 || !s->register_setting || !s->get || !s->revision) return;
+    AnyModSettingV1 d;
+    d.kind = ANY_SETTING_INTEGER;
+    d.mod_id = "anyengineparts"; d.mod_name = "AnyEngineParts";
+    d.setting_id = "turbo_volume"; d.label = "Turbo volume (%)";
+    d.description = "Loudness of the turbo whistle, blow-off valves and antilag. 100 is the normal level.";
+    d.default_number = 100; d.minimum = 0; d.maximum = 200; d.step = 5;
+    g_volume_token = s->register_setting(&d);
+    if (g_volume_token) g_settings = s;
+}
+
+double turbo_volume() {
+    if (!g_settings) return 1.0;
+    uint64_t revision = g_settings->revision();
+    if (revision == g_settings_revision) return g_volume;
+    g_settings_revision = revision;
+    AnySettingValueV1 v;
+    if (g_settings->get(g_volume_token, &v) && std::isfinite(v.number)) g_volume = std::clamp(v.number, 0.0, 200.0) / 100.0;
+    return g_volume;
+}
+
 void stream_sound(void* self, int kind, const double* dt) {
     double now = now_seconds();
     ClientVoice& v = g_voices[self];
@@ -1258,6 +1290,8 @@ void stream_sound(void* self, int kind, const double* dt) {
     int n = int(std::min<long long>(want, kSampleRate / 5));
     g_pcm.resize(size_t(n));
     render(v.synth, level, flag, g_pcm.data(), n);
+    if (double gain = turbo_volume(); gain != 1.0)
+        for (auto& sample : g_pcm) sample = int16_t(std::clamp(std::lround(sample * gain), -32768L, 32767L));
     GameBuffer buffer{nullptr, 0, 0};
     int32_t bytes = n * 2;
     g_buffer_reset(&buffer, &bytes);
@@ -1548,6 +1582,7 @@ void remove_hooks() {
 
 // AnyEngineParts (engine_parts_mod.cpp) is the DLL; it starts this part of it.
 void init(const AnyModHostV1& h) { host = h; }
+void ready() { register_settings(); }   // AnyAPI_ModReady, on the loader thread
 void start() { install_hooks(); }       // on AnyEngineParts' install thread
 void shutdown() { g_stop = true; remove_hooks(); }
 }  // namespace turbo
