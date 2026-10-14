@@ -18,10 +18,10 @@ keeps working defaults when it is absent.
 | [EngineSound](engine-sound.md) | 0.2.2 | API 0.34.0 | Engine sound presets and a Custom tuner in the Properties Tool, synced in co-op | None |
 | [AnyMirror](mirror.md) | 1.1.1 | API 0.34.0 | Mirrored edge building with either edge tool, a toggleable mirror wall and keybinds | AnyHelpers settings and controls |
 | [GpsPart](gps.md) | 1.0.1 | API 0.35.0; single player | A new GPS Sensor part: position, heading, pitch, roll, speed, acceleration and waypoint outputs for the data port and microcontroller | None |
-| [ThirdPerson](third-person.md) | 0.1.1 | API 0.35.0 | Third-person camera on F5 with an adjustable follow distance (Alt + mouse wheel) | AnyHelpers settings and controls |
+| [ThirdPerson](third-person.md) | 0.1.2 | API 0.35.0 | Third-person camera on F5 with an adjustable follow distance (Alt + mouse wheel) | AnyHelpers settings and controls |
 
 All mods are in the published catalog ([`catalog.json`](../../catalog.json)).
-All versions target Anymaker 0.1.25 / Steam build 25904830. On that build every mod needs AnyAPI 0.37.0 or newer, and the experimental-SDK mods need their 0.1.25 builds
+All versions target Anymaker 0.1.25 / Steam build 25904830. On that build every mod needs AnyAPI 0.37.0 or newer (AnyInventory lists modded items with 0.38.0), and the experimental-SDK mods need their 0.1.25 builds
 (AnyMirror 1.1.1, EngineSound 0.2.2, GpsPart 1.0.1, ThirdPerson 0.1.1). Anymaker 0.1.24 keeps AnyAPI 0.36.0 and 0.1.23 keeps 0.34.1.
 
 ## Prototypes
