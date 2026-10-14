@@ -823,7 +823,7 @@ void hk_tick(void* self, void* vehicle, void* scene) {
         double held = std::max(at<double>(oil_out, off::content_volume), moved);
         double& oil_t = at<double>(oil_out, off::content_temperature);
         if (std::isfinite(oil_t)) oil_t += (us.oil_out_c - oil_t) * std::min(1.0, moved / held);
-        double oil = 0, pollutant = 0, aged = 1.2e-4 * t.state.spool * in.dt;
+        double oil = 0, pollutant = 0, aged = 1.2e-5 * t.state.spool * in.dt;
         if (aged > 0 && oil_amounts(oil_out, oil, pollutant) && oil > aged) {
             int32_t type = off::kLiquidOil; double amount = -aged;
             g_liquid_modify(oil_out, &type, &amount);

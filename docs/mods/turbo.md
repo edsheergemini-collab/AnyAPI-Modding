@@ -82,7 +82,7 @@ wear at all. The times below are for full boost the whole time:
 
 - **Oil.** Pipe oil into the turbo's oil-in port and back out of the oil-out port. Whatever oil reaches the inlet
   passes through, up to 0.8 L/s, and leaves hotter; an oil cooler in the loop keeps it cool. At 0.5 L/s or more
-  the oil cools the turbo fully. Polluted oil wears it faster, and the turbo ages its oil a little, so keep an oil
+  the oil cools the turbo fully. Polluted oil wears it faster, and the turbo ages its oil very slowly, so keep an oil
   filter in the loop. Water or fuel in the line does not count as oil.
 - **Heat.** Exhaust heats the turbine and the shaft heats with speed (four times as much with no oil). With oil
   a turbo at full boost sits around 140 °C; dry it climbs to about 400 °C. Above 250 °C it wears faster, the
