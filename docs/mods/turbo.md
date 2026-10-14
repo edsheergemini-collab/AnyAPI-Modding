@@ -132,7 +132,7 @@ With AnyHelpers installed, **Mod Settings > AnyEngineParts > Turbo volume** sets
 ## Tooltip
 
 Looking at a turbo shows its intake flow, turbine speed and boost (the pressure it adds over the intake), in the
-game's own units.
+game's own units, then its **condition** (100 % new, 0 % seized) and **temperature** (see Upkeep).
 
 ## Data channels
 

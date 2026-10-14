@@ -906,12 +906,12 @@ using to_pascals_t = void (*)(double* ret, const double* value);
 using add_entry_t = void (*)(void* data, const int32_t* label, const anymaker::gc_string_view* value, const int32_t* icon, const int32_t* color);
 anymaker::cell_hook h_tooltip;
 build_tooltip_t g_component_tooltip;
-units_t g_units_flow, g_units_frequency, g_units_pressure;
+units_t g_units_flow, g_units_frequency, g_units_pressure, g_units_temperature;
 to_pascals_t g_to_pascals;
 self_fn_t g_string_dtor;
 constexpr int kAddTooltipEntrySlot = 68;             // server_scene.peer.inspection_data.vehicle method table
-enum : int32_t { kLocSpeed = 197, kLocFlow = 207, kLocPressure = 215, kLocBoost = 234, kLocStiffness = 351, kLocSoundEffect = 324 };   // e_localization_string
-enum : int32_t { kIconFlow = 16, kIconPressure = 30, kIconSpeed = 33 };         // inspection_util.e_tooltip_icon
+enum : int32_t { kLocCondition = 203, kLocTemperature = 212, kLocSpeed = 197, kLocFlow = 207, kLocPressure = 215, kLocBoost = 234, kLocStiffness = 351, kLocSoundEffect = 324 };   // e_localization_string
+enum : int32_t { kIconCondition = 6, kIconFlow = 16, kIconPressure = 30, kIconSpeed = 33, kIconTemperature = 37 };         // inspection_util.e_tooltip_icon
 
 void add_entry(void* data, add_entry_t add, int32_t label, int32_t icon, units_t format, double value) {
     anymaker::gc_string_view text{};
@@ -922,8 +922,17 @@ void add_entry(void* data, add_entry_t add, int32_t label, int32_t icon, units_t
     g_string_dtor(&text);
 }
 
+// A row whose value is plain text (the condition as a percentage).
+void add_text_entry(void* data, add_entry_t add, int32_t label, int32_t icon, const char* value) {
+    anymaker::gc_string_view text{};
+    g_string_ctor(&text, value);
+    int32_t color = 0;
+    add(data, &label, &text, &icon, &color);
+    g_string_dtor(&text);
+}
+
 void hk_tooltip(void* self, void* data) {
-    double flow = 0, rps = 0, boost = 0;
+    double flow = 0, rps = 0, boost = 0, condition = 1, temperature_c = kAmbientC;
     bool turbo = false, valve = false;
     {
         std::lock_guard<std::recursive_mutex> lock(g_mutex);
@@ -939,6 +948,8 @@ void hk_tooltip(void* self, void* data) {
             flow = found->second.state.intake_flow;
             rps = found->second.state.spool * found->second.spec.max_rpm / 60.0;
             boost = found->second.boost;
+            condition = found->second.up.condition;
+            temperature_c = found->second.up.temperature;
         }
     }
     auto add = (turbo || valve) && data ? reinterpret_cast<add_entry_t>(container_method(data, kAddTooltipEntrySlot)) : nullptr;
@@ -954,6 +965,11 @@ void hk_tooltip(void* self, void* data) {
     add_entry(data, add, kLocFlow, kIconFlow, g_units_flow, flow);
     add_entry(data, add, kLocSpeed, kIconSpeed, g_units_frequency, rps);
     add_entry(data, add, kLocBoost, kIconPressure, g_units_pressure, pascals);
+    // Upkeep: how worn the turbo is and how hot it runs. Shown from the first tick, so a new turbo reads 100 %.
+    char percent[16];
+    std::snprintf(percent, sizeof percent, "%.1f %%", std::clamp(std::isfinite(condition) ? condition : 1.0, 0.0, 1.0) * 100.0);
+    add_text_entry(data, add, kLocCondition, kIconCondition, percent);
+    if (g_units_temperature && std::isfinite(temperature_c)) add_entry(data, add, kLocTemperature, kIconTemperature, g_units_temperature, temperature_c);
 }
 
 // ------------------------------------------------------------------------------------- Properties Tool
@@ -1534,6 +1550,7 @@ void install_hooks() {
         g_units_flow = reinterpret_cast<units_t>(route::function(bind::units_flow));
         g_units_frequency = reinterpret_cast<units_t>(route::function(bind::units_frequency));
         g_units_pressure = reinterpret_cast<units_t>(route::function(bind::units_pressure));
+        g_units_temperature = reinterpret_cast<units_t>(route::function(bind::units_temperature));   // optional: no row without it
         g_to_pascals = reinterpret_cast<to_pascals_t>(route::function(bind::pressure_to_pascals));
         g_string_dtor = reinterpret_cast<self_fn_t>(native(anymaker::sym::string_dtor_rva));
         bool tooltip_ok = tooltip && g_component_tooltip && g_units_flow && g_units_frequency && g_units_pressure && g_to_pascals && g_string_dtor;
