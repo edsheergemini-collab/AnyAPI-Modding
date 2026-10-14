@@ -322,14 +322,14 @@
     {
       "Id": "gpspart",
       "Name": "GpsPart",
-      "Version": "1.0.1",
-      "Revision": 2,
+      "Version": "1.0.2",
+      "Revision": 3,
       "MinimumApi": 36,
       "Description": "Adds a GPS Sensor part with position, altitude, heading, pitch, roll, speed, acceleration and waypoint distance/bearing data channels. Single player only. Uses the experimental SDK; Anymaker 0.1.25 only.",
-      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/v0.37.0/GpsPart-1.0.1.zip",
-      "Sha256": "04add583c5cbd3005b4c94c0de64e96660f9fd0b47eafeb03e594a58e462f3f3",
+      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/mods-2026.10.14/GpsPart-1.0.2.zip",
+      "Sha256": "7a1dab48b7f48b55396957d639acf60380f657f116283339bbec180e7aaa26af",
       "FileHashes": {
-        "AnyAPI and Modding/mods/GpsPart.dll": "1b4ec3a1497e36a0c548abab765001fa8d188e290f60c30d23e98a0ae3c5d81a"
+        "AnyAPI and Modding/mods/GpsPart.dll": "5f7dada68903478cb68fa14637a81dde975b25c10222c921cb86ed4ba5b50918"
       },
       "GameBuilds": [
         {
@@ -351,6 +351,27 @@
       "Sha256": "d6fe049f92487f6f1524b6f6b437c38ff78a057705bf6b874b40f607b643f05a",
       "FileHashes": {
         "AnyAPI and Modding/mods/ThirdPerson.dll": "34d2b009a6c64e09ca435adbe2be2cb59de466f95c2cf61354cb8baaa4506ae6"
+      },
+      "GameBuilds": [
+        {
+          "Version": "0.1.25",
+          "SteamBuild": 25904830,
+          "ExeSha256": "5c46cd34a3b00889ff36154976428ba43f6475430e92a2d113a360a78161a7d0",
+          "GclSha256": "626a994be960b7218409d9ca416d2664450231d1fc3295036fc77c81b8449355"
+        }
+      ]
+    },
+    {
+      "Id": "anyengineparts",
+      "Name": "AnyEngineParts",
+      "Version": "0.1.0",
+      "Revision": 1,
+      "MinimumApi": 37,
+      "Description": "Turbochargers with blow-off valves, a wastegate with antilag, oil ports, air filters and a stretchable intercooler, plus a 1-4 rotor rotary engine. Anymaker 0.1.25 only.",
+      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/mods-2026.10.14/AnyEngineParts-0.1.0.zip",
+      "Sha256": "4fb6af111c6825120bb9482644d44e054ba6ae5d5d80f437cf6994cd83f43b42",
+      "FileHashes": {
+        "AnyAPI and Modding/mods/AnyEngineParts.dll": "6b7960ff8c2c87f510cde68b6010456bf388f6790b798c623d231465d4ca3265"
       },
       "GameBuilds": [
         {
