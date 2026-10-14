@@ -200,6 +200,7 @@ void steady_camera(double* ret, const double* head, const double* back, double d
     double tumble = 1.0 - std::max(0.0, up_now[1]);   // 0 level, 1 on its side, 2 upside down
     double f[3] = {-back[0], -back[1], -back[2]};
     double yaw = std::atan2(f[0], f[2]), pitch = std::asin(std::clamp(f[1], -1.0, 1.0));
+    if (!g_steady_active) { g_cam_yaw = yaw; g_cam_pitch = std::clamp(pitch, -1.2, 1.2); g_steady_active = true; }
     double ky = 1.0 - std::exp(-dt / (0.10 + 1.28 * tumble)), kp = 1.0 - std::exp(-dt / (0.21 + 1.28 * tumble));
     g_cam_yaw += angle_diff(yaw, g_cam_yaw) * ky;
     g_cam_pitch += (std::clamp(pitch, -1.2, 1.2) - g_cam_pitch) * kp;
