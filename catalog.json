@@ -5,14 +5,14 @@
     {
       "Id": "anyapi",
       "Name": "AnyAPI",
-      "Version": "0.38.0",
-      "Revision": 41,
+      "Version": "0.38.1",
+      "Revision": 42,
       "MinimumApi": 0,
-      "Description": "Native mod framework for Anymaker 0.1.25; the item catalog now includes parts and items added by other mods.",
-      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/v0.38.0/AnyAPI-0.38.0.zip",
-      "Sha256": "b7e1cbaff2772ba2bf03af41891355b0ac6323f2658919467ca0cec014f8ab8c",
+      "Description": "Native mod framework for Anymaker 0.1.25; parts added by mods now show a picture in the item browser.",
+      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/v0.38.1/AnyAPI-0.38.1.zip",
+      "Sha256": "ed025efec1edefcf8edd343a46a331bd95ac6519f4d5d96a7a30c45b386b5ca7",
       "FileHashes": {
-        "dinput8.dll": "230d3b7f0a4b10f0cec0f465d930395f23f977228db74d6e6361790ebc2705de"
+        "dinput8.dll": "cab37dbc5ce8b5d117ac25dac237c144123e1051fff465519b3f6e82d6ada09c"
       },
       "GameBuilds": [
         {
@@ -364,14 +364,14 @@
     {
       "Id": "anyengineparts",
       "Name": "AnyEngineParts",
-      "Version": "0.1.0",
-      "Revision": 1,
+      "Version": "0.2.0",
+      "Revision": 2,
       "MinimumApi": 37,
-      "Description": "Turbochargers with blow-off valves, a wastegate with antilag, oil ports, air filters and a stretchable intercooler, plus a 1-4 rotor rotary engine. Anymaker 0.1.25 only.",
-      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/mods-2026.10.14/AnyEngineParts-0.1.0.zip",
-      "Sha256": "4fb6af111c6825120bb9482644d44e054ba6ae5d5d80f437cf6994cd83f43b42",
+      "Description": "Turbochargers and belt-driven superchargers with blow-off valves, a wastegate with antilag and launch control, oil ports, air filters and intercoolers, a Dyno sensor, and a 1-4 rotor rotary engine. Anymaker 0.1.25 only.",
+      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/v0.38.1/AnyEngineParts-0.2.0.zip",
+      "Sha256": "9b8904d4d84840793e9fbb46e0d91bef240363e19b518bb71c5a1aa96569e0af",
       "FileHashes": {
-        "AnyAPI and Modding/mods/AnyEngineParts.dll": "6b7960ff8c2c87f510cde68b6010456bf388f6790b798c623d231465d4ca3265"
+        "AnyAPI and Modding/mods/AnyEngineParts.dll": "02c33201be53175544d44e8ce816a20b7f2222395449852016210f7a97f1839a"
       },
       "GameBuilds": [
         {
