@@ -381,6 +381,27 @@
           "GclSha256": "626a994be960b7218409d9ca416d2664450231d1fc3295036fc77c81b8449355"
         }
       ]
+    },
+    {
+      "Id": "mccode",
+      "Name": "MCCode",
+      "Version": "0.1.0",
+      "Revision": 1,
+      "MinimumApi": 41,
+      "Description": "A Code view in the microcontroller editor: type the program instead of placing blocks, with a command list, live values and the game's debugger. Anymaker 0.1.25 only.",
+      "Url": "https://github.com/sYx-tv/AnyAPI-Modding/releases/download/mods-2026.10.16/MCCode-0.1.0.zip",
+      "Sha256": "e6f57e578c236649c03819c39ebecade53d78e23417ccc5808ca6e5b863372da",
+      "FileHashes": {
+        "AnyAPI and Modding/mods/MCCode.dll": "9bcc80ad8e97a360cc542a44e75b7f8a079c7ea65a9db66601774cd6fb377ae7"
+      },
+      "GameBuilds": [
+        {
+          "Version": "0.1.25",
+          "SteamBuild": 25904830,
+          "ExeSha256": "5c46cd34a3b00889ff36154976428ba43f6475430e92a2d113a360a78161a7d0",
+          "GclSha256": "626a994be960b7218409d9ca416d2664450231d1fc3295036fc77c81b8449355"
+        }
+      ]
     }
   ]
 }
